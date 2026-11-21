@@ -16,6 +16,7 @@ struct RadarView: View {
     @State private var joining = false
     @State private var error: String?
     @State private var showJoin = false
+    @State private var nearbyTopics: [TopicOut] = []
     @State private var pool = PoolSimulation()
     @State private var poolRect: CGRect = .zero
     @State private var myAvatar = AvatarStore.load()
@@ -34,6 +35,8 @@ struct RadarView: View {
             ZStack(alignment: .top) {
                 TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduceMotion)) { timeline in
                     let t = pool.time(at: timeline.date, reduceMotion: reduceMotion)
+                    // 앱을 켜는 순간엔 크기가 0으로 먼저 잡혀서, 처음 한 번만 재면 터치 위치가 화면 밖으로 계산된다. 매 프레임 실제 크기를 쓴다
+                    let _ = pool.screenHeight = geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom
                     let frame = pool.advance(to: t)
                     PoolStage(
                         frame: frame,
@@ -49,7 +52,6 @@ struct RadarView: View {
             }
             .coordinateSpace(name: PoolSimulation.space)
             .ignoresSafeArea()
-            .onAppear { pool.screenHeight = geo.size.height + geo.safeAreaInsets.top + geo.safeAreaInsets.bottom }
         }
         .onChange(of: poolRect) { syncPool() }
         .onChange(of: count) { syncPool() }
@@ -167,6 +169,7 @@ struct RadarView: View {
                 WaterButton(title: "\(RoomName.short(areaName)) 리플 참여하기", systemImage: "arrow.up.right", isLoading: joining) {
                     Haptics.tap()
                     showJoin = true
+                    Task { await loadNearbyTopics() }
                 }
                 .disabled(count == 0 || location.location == nil)
             }
@@ -214,10 +217,55 @@ struct RadarView: View {
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xxl))
             }
             .buttonStyle(PressStyle(scale: 0.98))
+
+            if !nearbyTopics.isEmpty {
+                Text("주변 토픽방")
+                    .appFont(12, .bold)
+                    .foregroundStyle(Theme.mutedForeground)
+                    .padding(.top, 20)
+                    .padding(.bottom, 8)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(nearbyTopics) { topic in
+                            Button {
+                                Haptics.tap()
+                                showJoin = false
+                                Task { await join(topic: topic) }
+                            } label: {
+                                HStack(spacing: 12) {
+                                    TopicImage(url: topic.imageUrl, category: topic.category)
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xxl))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(TopicTitle.hashtag(topic.title))
+                                            .appFont(17, .bold)
+                                            .foregroundStyle(Theme.foreground)
+                                            .lineLimit(1)
+                                        Text("\(topic.placeName ?? areaName ?? "이 근처") · \(topic.memberCount)명")
+                                            .appFont(12)
+                                            .foregroundStyle(Theme.mutedForeground)
+                                            .lineLimit(1)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.mutedForeground)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 12)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle(scale: 0.98, dim: 0.7))
+                        }
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 28)
-        .presentationDetents([.height(250)])
+        .frame(maxHeight: .infinity, alignment: .top)
+        .presentationDetents([.height(nearbyTopics.isEmpty ? 250 : min(250 + 36 + CGFloat(nearbyTopics.count) * 88, 640))])
         .presentationCornerRadius(Theme.Radius.sheet)
         .presentationBackground(Theme.popover)
         .presentationDragIndicator(.visible)
@@ -288,6 +336,36 @@ struct RadarView: View {
         }
     }
 
+    /// 방에 들어가기 전 주변 토픽방. 서버에 /nearby/topics가 없으면 지금 들어가 있는 리플의 토픽으로 대신한다
+    private func loadNearbyTopics() async {
+        if let topics: [TopicOut] = try? await app.api.request("GET", "/nearby/topics") {
+            nearbyTopics = topics
+            return
+        }
+        if let chats: ChatsOut = try? await app.api.request("GET", "/me/chats"), let room = chats.room,
+           let topics: [TopicOut] = try? await app.api.request("GET", "/rooms/\(room.id)/topics") {
+            nearbyTopics = topics
+        }
+    }
+
+    /// 주변 토픽방 입장: 동네 리플에 먼저 들어간 뒤 토픽에 참여한다
+    private func join(topic: TopicOut) async {
+        joining = true
+        defer { joining = false }
+        error = nil
+        if let loc = location.location {
+            let body = ["lat": loc.coordinate.latitude, "lng": loc.coordinate.longitude, "accuracy": loc.horizontalAccuracy]
+            let _: PresenceOut? = try? await app.api.request("POST", "/presence", body: body)
+        }
+        do {
+            let room: RoomOut = try await app.api.request("POST", "/rooms/join")
+            let joined: TopicOut = try await app.api.request("POST", "/topics/\(topic.id)/join")
+            WaveTransition.shared.go { app.path = [.room(room), .topic(joined)] }
+        } catch {
+            self.error = "이 토픽방은 지금 들어갈 수 없어요. 리플에 먼저 참여해 주세요"
+        }
+    }
+
     private func join() async {
         joining = true
         defer { joining = false }
@@ -299,7 +377,7 @@ struct RadarView: View {
         }
         do {
             let room: RoomOut = try await app.api.request("POST", "/rooms/join")
-            app.path.append(.room(room))
+            WaveTransition.shared.go { app.path.append(.room(room)) }
         } catch {
             self.error = error.localizedDescription
         }
