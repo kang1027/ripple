@@ -54,6 +54,7 @@ struct MainView: View {
                 }
             }
         }
+        .waveOverlay()
         // 탭·채팅방 어디에 있든 위치를 보내야 방을 벗어난 걸 서버가 안다
         .task { await app.presenceLoop() }
         .preferredColorScheme(.light)

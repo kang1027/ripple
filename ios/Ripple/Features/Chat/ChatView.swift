@@ -492,7 +492,7 @@ struct ChatView: View {
     private func openTopic(_ topicId: String) async {
         if let topic = await vm.joinTopic(topicId) {
             showTopics = false
-            app.path.append(.topic(topic))
+            WaveTransition.shared.go { app.path.append(.topic(topic)) }
         }
     }
 

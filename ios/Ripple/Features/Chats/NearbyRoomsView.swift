@@ -77,14 +77,14 @@ struct NearbyRoomsView: View {
     private func open(_ topic: TopicOut) async {
         Haptics.tap()
         if topic.isMember {
-            app.path.append(.topic(topic))
+            WaveTransition.shared.go { app.path.append(.topic(topic)) }
             return
         }
         opening = topic.id
         defer { opening = nil }
         do {
             let joined: TopicOut = try await app.api.request("POST", "/topics/\(topic.id)/join")
-            app.path.append(.topic(joined))
+            WaveTransition.shared.go { app.path.append(.topic(joined)) }
         } catch {
             self.error = error.localizedDescription
         }
