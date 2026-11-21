@@ -231,10 +231,12 @@ struct RadarView: View {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(PoolSimulation.space))
             .onChanged { value in
                 let t = pool.time(at: .now, reduceMotion: reduceMotion)
-                if pool.dragStarted {
+                // 시작 위치가 다르면 새 터치. 앞 터치가 팝업·시트로 취소돼 onEnded가 안 불렸어도 여기서 새로 시작한다
+                if pool.gestureStart == value.startLocation {
                     pool.moveHeld(to: value.location, time: t)
                 } else {
-                    pool.dragStarted = true
+                    pool.gestureStart = value.startLocation
+                    pool.dropHeld(time: t)
                     if pool.grab(at: value.location, time: t) {
                         Haptics.tap()
                     } else if !reduceMotion {
@@ -247,7 +249,7 @@ struct RadarView: View {
                 if pool.release(at: value.location, velocity: value.velocity, time: t) {
                     Haptics.select()
                 }
-                pool.dragStarted = false
+                pool.gestureStart = nil
             }
     }
 
@@ -433,7 +435,8 @@ final class PoolSimulation {
     static let space = "pool-home"
 
     var screenHeight: CGFloat = 852
-    var dragStarted = false
+    /// 지금 진행 중인 터치의 시작 위치
+    var gestureStart: CGPoint?
     private var start = Date()
     private var avatars: [Avatar] = []
     private var bodies: [PoolBody] = []
@@ -530,6 +533,13 @@ final class PoolSimulation {
     func moveHeld(to p: CGPoint, time t: Double) {
         guard let h = held else { return }
         held = (h.index, clampX(p.x), clampY(p.y))
+    }
+
+    /// 취소된 터치로 붙잡힌 채 남은 캐릭터를 제자리에 내려놓는다
+    func dropHeld(time t: Double) {
+        guard let h = held else { return }
+        held = nil
+        bodies[h.index].lastTime = t
     }
 
     func release(at p: CGPoint, velocity: CGSize, time t: Double) -> Bool {
