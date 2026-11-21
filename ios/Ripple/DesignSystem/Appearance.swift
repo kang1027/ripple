@@ -36,29 +36,6 @@ enum ChatTextSize: String, CaseIterable {
     }
 }
 
-/// 홈 오른쪽 위 라이트·다크 전환 버튼
-struct ThemeToggleButton: View {
-    @AppStorage(AppearanceKey.theme) private var themeRaw = ThemeMode.light.rawValue
-
-    var body: some View {
-        let mode = ThemeMode(rawValue: themeRaw) ?? .light
-        Button {
-            Haptics.select()
-            withAnimation(Motion.settle(0.3)) {
-                themeRaw = (mode == .light ? ThemeMode.dark : .light).rawValue
-            }
-        } label: {
-            Image(systemName: mode == .light ? "moon" : "sun.max")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(Theme.secondary))
-        }
-        .buttonStyle(PressStyle(scale: 0.9))
-        .accessibilityLabel(mode == .light ? "다크 모드 켜기" : "라이트 모드 켜기")
-    }
-}
-
 /// 토픽·리플 커버 그라데이션 (디자인 --wave-1…5, 145°)
 struct CoverGradient: View {
     var style: Int = 2

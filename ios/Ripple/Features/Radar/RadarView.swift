@@ -8,7 +8,6 @@ struct RadarView: View {
     @Environment(LocationService.self) private var location
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(AppearanceKey.theme) private var themeRaw = ThemeMode.light.rawValue
     @State private var count = 0
     @State private var avatars: [String?] = []
     @State private var characters: [Avatar?] = []
@@ -132,7 +131,6 @@ struct RadarView: View {
             .allowsHitTesting(false)
             .accessibilityElement(children: .combine)
             Spacer()
-            ThemeToggleButton()
         }
     }
 
@@ -520,10 +518,14 @@ final class PoolSimulation {
 
     func grab(at p: CGPoint, time t: Double) -> Bool {
         guard held == nil else { return false }
+        // 몸 가운데부터 머리 위쪽 28pt까지를 잡을 수 있는 영역으로 본다 (손가락이 캐릭터를 가리지 않게)
         var best: (Int, Double)?
         for (i, b) in bodies.enumerated() {
-            let d = hypot(b.x + rect.minX - p.x, b.y + rect.minY - p.y)
-            if d < 30, d < (best?.1 ?? .infinity) { best = (i, d) }
+            let cx = b.x + rect.minX, cy = b.y + rect.minY
+            let top = cy - 28
+            let nearestY = min(max(p.y, top), cy)
+            let d = hypot(cx - p.x, nearestY - p.y)
+            if d < 34, d < (best?.1 ?? .infinity) { best = (i, d) }
         }
         guard let (index, _) = best else { return false }
         held = (index, clampX(p.x), clampY(p.y))

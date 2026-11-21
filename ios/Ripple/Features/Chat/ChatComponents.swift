@@ -364,7 +364,7 @@ struct MessageActionSheet: View {
 
 // MARK: - 대화 설정 시트
 
-/// "내게 편한 대화": 화면 모드·글자 크기, 동네 리플에서는 방 나가기도
+/// "내게 편한 대화": 글자 크기, 동네 리플에서는 방 나가기도
 struct ChatSettingsSheet: View {
     var onLeave: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
@@ -374,7 +374,7 @@ struct ChatSettingsSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 SheetHeader(title: "내게 편한 대화") { dismiss() }
-                AppearanceControls(chat: true)
+                AppearanceControls()
                     .padding(.top, 24)
                 if onLeave != nil {
                     Button {

@@ -27,7 +27,6 @@ enum MainTab: CaseIterable {
 /// 로그인 후 메인: 탭 화면 + 하단 탭바. 채팅방에 들어가면 탭바는 가려짐
 struct MainView: View {
     @Environment(AppState.self) private var app
-    @AppStorage(AppearanceKey.theme) private var themeRaw = ThemeMode.light.rawValue
 
     var body: some View {
         @Bindable var app = app
@@ -57,7 +56,7 @@ struct MainView: View {
         }
         // 탭·채팅방 어디에 있든 위치를 보내야 방을 벗어난 걸 서버가 안다
         .task { await app.presenceLoop() }
-        .preferredColorScheme((ThemeMode(rawValue: themeRaw) ?? .light).scheme)
+        .preferredColorScheme(.light)
     }
 }
 

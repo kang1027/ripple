@@ -109,15 +109,11 @@ struct TopicCover: View {
     }
 }
 
-/// 화면 모드·대화 글자 크기 설정 (내 정보·대화 설정 시트 공용)
+/// 대화 글자 크기 설정 (내 정보·대화 설정 시트 공용). 화면은 라이트로 고정
 struct AppearanceControls: View {
-    /// 대화 시트에서는 스위치, 내 정보에서는 라이트·다크 버튼 묶음
-    var chat = false
-    @AppStorage(AppearanceKey.theme) private var themeRaw = ThemeMode.light.rawValue
     @AppStorage(AppearanceKey.chatSize) private var chatSizeRaw = ChatTextSize.medium.rawValue
     @Environment(AppState.self) private var app
 
-    private var mode: ThemeMode { ThemeMode(rawValue: themeRaw) ?? .light }
     private var size: ChatTextSize { ChatTextSize(rawValue: chatSizeRaw) ?? .medium }
 
     var body: some View {
@@ -127,56 +123,10 @@ struct AppearanceControls: View {
                 .foregroundStyle(Theme.mutedForeground)
                 .padding(.bottom, 12)
             HStack {
-                Text("화면 모드").appFont(14, .semibold).foregroundStyle(Theme.foreground)
-                Spacer()
-                if chat {
-                    HStack(spacing: 12) {
-                        Image(systemName: "sun.max").foregroundStyle(Theme.mutedForeground)
-                        Toggle("다크 모드", isOn: Binding(
-                            get: { mode == .dark },
-                            set: { themeRaw = ($0 ? ThemeMode.dark : .light).rawValue }
-                        ))
-                        .labelsHidden()
-                        .tint(Theme.primary)
-                        Image(systemName: "moon").foregroundStyle(Theme.mutedForeground)
-                    }
-                    .font(.system(size: 15))
-                } else {
-                    HStack(spacing: 4) {
-                        ForEach(ThemeMode.allCases, id: \.self) { m in
-                            Button {
-                                Haptics.select()
-                                withAnimation(Motion.settle(0.3)) { themeRaw = m.rawValue }
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: m.symbol).font(.system(size: 13, weight: .medium))
-                                    Text(m.label).appFont(12, mode == m ? .semibold : .regular)
-                                }
-                                .foregroundStyle(mode == m ? Theme.foreground : Theme.mutedForeground)
-                                .padding(.horizontal, 12)
-                                .frame(height: 36)
-                                .background(
-                                    RoundedRectangle(cornerRadius: Theme.Radius.lg)
-                                        .fill(mode == m ? Theme.background : .clear)
-                                        .shadow(color: .black.opacity(mode == m ? 0.08 : 0), radius: 1, y: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(mode == m ? .isSelected : [])
-                        }
-                    }
-                    .padding(4)
-                    .background(RoundedRectangle(cornerRadius: Theme.Radius.xl).fill(Theme.secondary))
-                }
-            }
-            .padding(.vertical, 8)
-
-            HStack {
                 Text("대화 글자 크기").appFont(14, .semibold).foregroundStyle(Theme.foreground)
                 Spacer()
                 Text(size.label).appFont(12, .semibold).foregroundStyle(Theme.primary)
             }
-            .padding(.top, 16)
             Slider(
                 value: Binding(
                     get: { Double(ChatTextSize.allCases.firstIndex(of: size) ?? 1) },
