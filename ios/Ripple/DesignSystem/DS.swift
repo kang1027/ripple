@@ -598,6 +598,8 @@ struct FormScaffold<Header: View, Content: View, Footer: View>: View {
                 ScrollView {
                     content
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // 입력칸·버튼이 아닌 여백을 누르면 키보드를 닫는다
+                        .background(Color.clear.contentShape(Rectangle()).onTapGesture { Keyboard.dismiss() })
                         .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.interactively)

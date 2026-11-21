@@ -349,6 +349,8 @@ struct NicknameEditorSheet: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 34)
+        .contentShape(Rectangle())
+        .onTapGesture { focused = false }
         .rippleSheet(detents: [.height(400)])
         .onAppear { focused = true }
     }

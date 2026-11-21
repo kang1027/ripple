@@ -345,6 +345,8 @@ struct ChatView: View {
                 .frame(minHeight: geo.size.height, alignment: .top)
             }
             .clipped()
+            // 대화 목록 어디를 눌러도 키보드를 닫는다 (버튼은 그대로 눌림)
+            .simultaneousGesture(TapGesture().onEnded { inputFocused = false })
             // 키보드가 올라와도 마지막 메시지가 아래에 붙어 있게
             .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
