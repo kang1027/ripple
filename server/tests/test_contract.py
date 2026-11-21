@@ -86,6 +86,8 @@ def test_topic_survives_leaving_room_and_mute_leave(client, monkeypatch, sent_pu
     _drain_topics(client)
     topics = client.get("/me/chats", headers=auth(a)).json()["topics"]
     topic = topics[0]
+    near = client.get("/nearby/topics", headers=auth(b)).json()
+    assert [t["id"] for t in near] == [topic["id"]] and near[0]["cover_url"] and near[0]["place_name"]
     assert topic["place_name"] and topic["created_at"] and topic["muted"] is False
     assert topic["cover_url"].endswith(f"/static/topics/bg/{topic['category']}.jpg")
     assert client.get(f"/static/topics/bg/{topic['category']}.jpg").status_code == 200

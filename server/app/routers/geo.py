@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..db import get_session
-from ..models import Room, RoomMember, User
+from ..models import Room, RoomMember, Topic, User
 from ..redis_client import get_redis
-from ..schemas import NearbyOut, PresenceIn, PresenceOut, RoomOut
+from ..schemas import NearbyOut, PresenceIn, PresenceOut, RoomOut, TopicOut
 from ..security import active_user
 from ..services import geo, notify
-from ..services.chat import blocked_ids, publish, room_channel, room_out
+from ..services.chat import blocked_ids, publish, room_channel, room_out, topic_out
 
 router = APIRouter(tags=["geo"])
 log = logging.getLogger("ripple.geo")
@@ -190,6 +190,28 @@ async def nearby(user: User = Depends(active_user), session: AsyncSession = Depe
         radius_m=s.radius_m,
         area_name=await geo.place_name(pos["lat"], pos["lng"]),
     )
+
+
+@router.get("/nearby/topics", response_model=list[TopicOut])
+async def nearby_topics(user: User = Depends(active_user), session: AsyncSession = Depends(get_session)):
+    """방에 들어가기 전에 보여 줄 주변 토픽방. /rooms/join이 찾는 범위 안의 열린 방들 토픽, 최근 대화순 10개."""
+    s = get_settings()
+    pos = await geo.last_position(user.id)
+    if pos is None:
+        return []
+    room_ids = await geo.nearest_room_id(pos["lat"], pos["lng"], geo.room_search_m(s.radius_m))
+    if not room_ids:
+        return []
+    topics = (
+        await session.execute(
+            select(Topic)
+            .join(Room, Room.id == Topic.room_id)
+            .where(Topic.room_id.in_(room_ids), Room.closed_at.is_(None))
+            .order_by(Topic.last_message_at.desc())
+            .limit(10)
+        )
+    ).scalars().all()
+    return [await topic_out(session, t, user.id) for t in topics]
 
 
 # 둘이 동시에 '채팅하기'를 눌러 방이 두 개 생기지 않게 (서버는 replicas 1)
