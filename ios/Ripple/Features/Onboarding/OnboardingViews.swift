@@ -137,7 +137,6 @@ struct PhoneVerifyView: View {
             if focused { scrollTarget = "code" }
         }
         .onAppear { phoneFocused = true }
-        .waveOverlay()
     }
 
     @State private var lastSentDigits = ""
@@ -190,8 +189,7 @@ struct PhoneVerifyView: View {
             verified = true
             codeFocused = false
             try? await Task.sleep(for: .milliseconds(300))
-            // 인증을 마치면 물빛 원이 퍼지며 다음 화면으로 넘어간다
-            WaveTransition.shared.go(settle: .milliseconds(480)) { await app.refreshMe() }
+            await app.refreshMe()
         } catch {
             verifying = false
             Haptics.error()
@@ -391,7 +389,6 @@ struct ProfileSetupView: View {
                 .disabled(trimmed.count < 2)
         }
         .animation(Motion.settle(), value: error)
-        .waveOverlay()
         .onAppear { nickname = app.me?.nickname ?? "" }
         .onChange(of: nicknameFocused) { _, focused in
             if focused { scrollTarget = "nickname" }
@@ -489,7 +486,7 @@ struct ProfileSetupView: View {
             AvatarStore.save(avatar)
             let _: UserOut = try await app.api.request("PATCH", "/me", body: Body(nickname: trimmed, avatar: avatar))
             Haptics.success()
-            WaveTransition.shared.go(settle: .milliseconds(480)) { await app.refreshMe() }
+            await app.refreshMe()
         } catch {
             Haptics.error()
             self.error = error.localizedDescription

@@ -43,7 +43,7 @@ struct ChatsView: View {
             ForEach(visible) { topic in
                 Button {
                     Haptics.tap()
-                    WaveTransition.shared.push { app.path.append(.topic(topic)) }
+                    app.path.append(.topic(topic))
                 } label: {
                     TopicRoomRow(topic: topic, place: nil)
                         .overlay(alignment: .trailing) {

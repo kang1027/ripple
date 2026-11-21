@@ -190,7 +190,7 @@ struct RadarView: View {
             Button {
                 Haptics.tap()
                 showJoin = false
-                // 시트가 다 내려간 뒤에 전환 원이 퍼지게
+                // 시트가 다 내려간 뒤에 넘어가게
                 Task {
                     try? await Task.sleep(for: .milliseconds(320))
                     await join()
@@ -367,7 +367,7 @@ struct RadarView: View {
         do {
             let room: RoomOut = try await app.api.request("POST", "/rooms/join")
             let joined: TopicOut = try await app.api.request("POST", "/topics/\(topic.id)/join")
-            WaveTransition.shared.push { app.path = [.room(room), .topic(joined)] }
+            app.path = [.room(room), .topic(joined)]
         } catch {
             self.error = "이 토픽방은 지금 들어갈 수 없어요. 리플에 먼저 참여해 주세요"
         }
@@ -384,7 +384,7 @@ struct RadarView: View {
         }
         do {
             let room: RoomOut = try await app.api.request("POST", "/rooms/join")
-            WaveTransition.shared.push { app.path.append(.room(room)) }
+            app.path.append(.room(room))
         } catch {
             self.error = error.localizedDescription
         }
