@@ -1,30 +1,107 @@
 import SwiftUI
 import UIKit
 
-/// shadcn/ui neutral 기본 테마 근사치. 디자인이 나오면 여기만 바꾸면 됨.
+/// Ripple 디자인 토큰 (Lovable 디자인 styles.css의 oklch 값을 sRGB로 계산한 값).
+/// 색은 라이트·다크에 따라 바뀌는 동적 색이다.
 enum Theme {
-    static let background = Color(hex: 0xFFFFFF)
-    static let foreground = Color(hex: 0x0A0A0A)
-    static let primary = Color(hex: 0x171717)
-    static let primaryForeground = Color(hex: 0xFAFAFA)
-    static let muted = Color(hex: 0xF5F5F5)
-    static let mutedForeground = Color(hex: 0x737373)
-    static let border = Color(hex: 0xE5E5E5)
-    static let ring = Color(hex: 0xD4D4D4)
-    static let destructive = Color(hex: 0xDC2626)
+    static let background = Color(light: 0xFFFFFF, dark: 0x0C0D10)
+    static let foreground = Color(light: 0x151B24, dark: 0xF0F2F5)
+    static let card = Color(light: 0xF5F7F9, dark: 0x16181D)
+    static let popover = Color(light: 0xFFFFFF, dark: 0x14161A)
+    static let primary = Color(light: 0x007DF3, dark: 0x3AB0FF)
+    static let primaryForeground = Color(light: 0xFFFFFF, dark: 0x080E16)
+    static let primarySoft = Color(light: 0xE0F1FF, dark: 0x0F2840)
+    static let secondary = Color(light: 0xEDF0F4, dark: 0x202226)
+    static let muted = Color(light: 0xE4E8ED, dark: 0x2C2E32)
+    static let mutedForeground = Color(light: 0x757B83, dark: 0x9B9EA5)
+    static let border = Color(light: 0xE2E5E8, dark: 0x2E3036)
+    static let ring = primary
+    static let destructive = Color(hex: 0xEE343B)
+    static let destructiveForeground = Color(hex: 0xFFFFFF)
+    static let chatOwn = primary
+    static let chatOwnForeground = primaryForeground
+    static let chatOther = Color(light: 0xEDF0F4, dark: 0x202226)
+    static let storyForeground = Color(hex: 0xFFFFFF)
     static let kakao = Color(hex: 0xFEE500)
     static let kakaoLabel = Color(hex: 0x191919)
-    static let radius: CGFloat = 10
-    static let controlHeight: CGFloat = 52
+
+    /// 홈 수영장
+    enum Water {
+        static let deep = Color(light: 0x0061AC, dark: 0x002C58)
+        static let shallow = Color(light: 0x3EA5E3, dark: 0x0069A1)
+        static let highlight = Color(light: 0xFFFFFF, dark: 0x7EBCD0)
+        static let floor = Color(light: 0x0088CB, dark: 0x004880)
+        static let lettering = Color(light: 0xE3F5FF, dark: 0xC5E3F5)
+        static let grout = Color(light: 0x8BBFDE, lightAlpha: 0.18, dark: 0x5197C6, darkAlpha: 0.25)
+
+        /// 셰이더에 넘길 원본 sRGB 값 (Three.js와 같이 변환 없이 계산)
+        static func raw(_ scheme: ColorScheme) -> (deep: UInt32, shallow: UInt32, highlight: UInt32) {
+            scheme == .dark ? (0x002C58, 0x0069A1, 0x7EBCD0) : (0x0061AC, 0x3EA5E3, 0xFFFFFF)
+        }
+    }
+
+    /// 둥글기 (디자인은 --radius 16px 기준으로 단계를 다시 정의함)
+    enum Radius {
+        static let sm: CGFloat = 12
+        static let md: CGFloat = 14
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 20
+        static let xxl: CGFloat = 24
+        static let sheet: CGFloat = 28
+    }
+
+    static let radius: CGFloat = Radius.xxl
+    static let controlHeight: CGFloat = 56
 }
 
 extension Color {
-    init(hex: UInt32) {
+    init(hex: UInt32, alpha: Double = 1) {
         self.init(
+            .sRGB,
             red: Double((hex >> 16) & 0xFF) / 255,
             green: Double((hex >> 8) & 0xFF) / 255,
-            blue: Double(hex & 0xFF) / 255
+            blue: Double(hex & 0xFF) / 255,
+            opacity: alpha
         )
+    }
+
+    init(light: UInt32, lightAlpha: Double = 1, dark: UInt32, darkAlpha: Double = 1) {
+        self.init(uiColor: UIColor { traits in
+            let hex = traits.userInterfaceStyle == .dark ? dark : light
+            let alpha = traits.userInterfaceStyle == .dark ? darkAlpha : lightAlpha
+            return UIColor(
+                red: CGFloat((hex >> 16) & 0xFF) / 255,
+                green: CGFloat((hex >> 8) & 0xFF) / 255,
+                blue: CGFloat(hex & 0xFF) / 255,
+                alpha: alpha
+            )
+        })
+    }
+}
+
+/// SwiftUI 글꼴. Pretendard가 앱에 들어 있으면 그걸 쓰고, 없으면 시스템 글꼴로 떨어진다
+enum AppFont {
+    static func size(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        let name: String
+        switch weight {
+        case .black: name = "Pretendard-Black"
+        case .heavy: name = "Pretendard-ExtraBold"
+        case .bold: name = "Pretendard-Bold"
+        case .semibold: name = "Pretendard-SemiBold"
+        case .medium: name = "Pretendard-Medium"
+        default: name = "Pretendard-Regular"
+        }
+        if UIFont(name: name, size: size) != nil {
+            return .custom(name, fixedSize: size)
+        }
+        return .system(size: size, weight: weight)
+    }
+}
+
+extension View {
+    /// 디자인 글자 크기·굵기 (pt)
+    func appFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> some View {
+        font(AppFont.size(size, weight))
     }
 }
 
@@ -162,8 +239,8 @@ struct RippleHero: View {
                         let r = start + (end - start) * eased
                         ctx.stroke(
                             Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
-                            with: .color(Theme.foreground.opacity(0.18 * (1 - p))),
-                            lineWidth: 1
+                            with: .color(Theme.primary.opacity(0.5 * (1 - p))),
+                            lineWidth: 2
                         )
                     }
                 }
@@ -171,7 +248,11 @@ struct RippleHero: View {
             .frame(width: spread, height: spread)
             .opacity(appeared ? 1 : 0)
 
-            RippleMark(size: markSize)
+            Image("RippleLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: markSize, height: markSize)
+                .offset(y: -markSize * 0.2)
                 .scaleEffect(appeared || reduceMotion ? 1 : 0.82)
                 .opacity(appeared ? 1 : 0)
         }
@@ -213,6 +294,7 @@ struct ShadButton: View {
     var variant: Variant = .primary
     var isLoading = false
     var compact = false
+    var systemImage: String?
     let action: () -> Void
 
     @Environment(\.isEnabled) private var isEnabled
@@ -222,32 +304,35 @@ struct ShadButton: View {
         variant: Variant = .primary,
         isLoading: Bool = false,
         compact: Bool = false,
+        systemImage: String? = nil,
         action: @escaping () -> Void
     ) {
         self.title = title
         self.variant = variant
         self.isLoading = isLoading
         self.compact = compact
+        self.systemImage = systemImage
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
             ZStack {
-                Text(title)
-                    .font(.system(size: compact ? 14 : 16, weight: .semibold))
-                    .lineLimit(1)
-                    .opacity(isLoading ? 0 : 1)
+                HStack(spacing: 6) {
+                    if let systemImage { Image(systemName: systemImage).font(.system(size: compact ? 13 : 15, weight: .bold)) }
+                    Text(title).appFont(compact ? 14 : 17, .bold).lineLimit(1)
+                }
+                .opacity(isLoading ? 0 : 1)
                 if isLoading { ProgressView().tint(foreground) }
             }
             .frame(maxWidth: compact ? nil : .infinity)
-            .padding(.horizontal, compact ? 14 : 0)
+            .padding(.horizontal, compact ? 16 : 0)
             .frame(height: Theme.controlHeight)
             .foregroundStyle(isEnabled ? foreground : Theme.mutedForeground)
             .background(isEnabled ? background : disabledBackground)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xxl))
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.radius)
+                RoundedRectangle(cornerRadius: Theme.Radius.xxl)
                     .stroke(variant == .outline ? Theme.border : .clear, lineWidth: 1)
             )
             .animation(Motion.settle(), value: isEnabled)
@@ -259,7 +344,8 @@ struct ShadButton: View {
 
     private var foreground: Color {
         switch variant {
-        case .primary, .destructive: return Theme.primaryForeground
+        case .primary: return Theme.primaryForeground
+        case .destructive: return Theme.destructiveForeground
         default: return Theme.foreground
         }
     }
@@ -267,7 +353,7 @@ struct ShadButton: View {
     private var background: Color {
         switch variant {
         case .primary: return Theme.primary
-        case .secondary: return Theme.muted
+        case .secondary: return Theme.secondary
         case .destructive: return Theme.destructive
         case .outline, .ghost: return .clear
         }
@@ -284,23 +370,19 @@ struct ShadFieldStyle: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .font(.system(size: 16))
-            .padding(.horizontal, 14)
+            .font(AppFont.size(18, .semibold))
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 20)
             .frame(height: Theme.controlHeight)
-            .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.background))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(borderColor, lineWidth: focused || invalid ? 1.5 : 1))
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radius + 3)
-                    .stroke(focused ? Theme.muted : .clear, lineWidth: 6)
-                    .padding(-1.5)
-            )
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.xxl).fill(Theme.secondary))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xxl).stroke(borderColor, lineWidth: 1))
             .animation(Motion.settle(), value: focused)
             .animation(Motion.settle(), value: invalid)
     }
 
     private var borderColor: Color {
         if invalid { return Theme.destructive }
-        return focused ? Theme.foreground : Theme.border
+        return focused ? Theme.primary : .clear
     }
 }
 
