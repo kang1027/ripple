@@ -7,6 +7,7 @@
 import asyncio
 import json
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -26,6 +27,7 @@ from ..services.chat import (
 
 router = APIRouter()
 log = logging.getLogger("ripple.ws")
+MEMBERSHIP_CHECK_S = 10
 
 
 async def _authorize(kind: str, target_id: str, token: str) -> tuple[User, str, str | None] | None:
@@ -61,8 +63,19 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
     await pubsub.subscribe(channel)
     await notify.mark_online(channel, user.id)
 
+    async def still_member() -> bool:
+        async with sessionmaker()() as session:
+            return await active_membership(session, room_id, user.id) is not None
+
     async def pump() -> None:
+        last_check = time.monotonic()
         while True:
+            # 방에서 빠진 뒤(범위 이탈·나가기·다른 방으로 이동)에는 이 소켓으로 더 보내지 않는다
+            if time.monotonic() - last_check >= MEMBERSHIP_CHECK_S:
+                last_check = time.monotonic()
+                if not await still_member():
+                    await ws.close(code=4403)
+                    return
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if msg is None:
                 continue
@@ -71,6 +84,10 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
                 event = json.loads(data)
             except (TypeError, ValueError):
                 continue
+            if event.get("type") == "out_of_range" and event.get("user_id") == user.id:
+                await ws.send_text(data if isinstance(data, str) else data.decode())
+                await ws.close(code=4403)
+                return
             sender = (event.get("message") or {}).get("sender") or {}
             if sender.get("id") in hidden:
                 continue
