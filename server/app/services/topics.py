@@ -261,6 +261,31 @@ async def _post_card(session: AsyncSession, topic: Topic, reminder: bool, reply_
         await publish(room_channel(topic.room_id), {"type": "topic_created", "topic": out.model_dump(mode="json")})
 
 
+async def confirm_topic(
+    session: AsyncSession,
+    room: Room,
+    *,
+    title: str,
+    summary: str,
+    category: str,
+    user_ids: set[str],
+    reply_to: int | None = None,
+) -> Topic:
+    """토픽을 만들고 같은 주제로 말한 사람들을 넣은 뒤 카드와 알림을 보낸다."""
+    topic = Topic(room_id=room.id, title=title, summary=summary, category=category)
+    session.add(topic)
+    await session.flush()
+    for uid in user_ids:
+        if await session.get(User, uid):
+            session.add(TopicMember(topic_id=topic.id, user_id=uid))
+    await session.commit()
+    # 확정 직후 이어지는 대화가 곧바로 리마인드 카드를 띄우지 않게 한다
+    await get_redis().set(f"topic_remind:{topic.id}", "1", ex=get_settings().topic_reminder_s)
+    await _post_card(session, topic, reminder=False, reply_to=reply_to)
+    notify.spawn(notify.on_topic_created(topic.id))
+    return topic
+
+
 @dataclass
 class JobOutcome:
     """status는 테스트·로그용: skip | none | reminder | candidate | confirmed. title은 분류된 주제."""
@@ -324,22 +349,15 @@ async def process_job(session: AsyncSession, job: dict, classifier: TopicClassif
             return JobOutcome("candidate", cand["title"])
         # 다른 사람이 같은 주제로 반응 → 확정
         await r.hdel(key, cid)
-        topic = Topic(
-            room_id=room.id,
+        topic = await confirm_topic(
+            session,
+            room,
             title=cand["title"],
             summary=cand["summary"] or result.summary,
             category=cand["category"],
+            user_ids={cand["user_id"], job["user_id"]},
+            reply_to=job.get("message_id"),
         )
-        session.add(topic)
-        await session.flush()
-        for uid in {cand["user_id"], job["user_id"]}:
-            if await session.get(User, uid):
-                session.add(TopicMember(topic_id=topic.id, user_id=uid))
-        await session.commit()
-        # 확정 직후 이어지는 대화가 곧바로 리마인드 카드를 띄우지 않게 한다
-        await r.set(f"topic_remind:{topic.id}", "1", ex=s.topic_reminder_s)
-        await _post_card(session, topic, reminder=False, reply_to=job.get("message_id"))
-        notify.spawn(notify.on_topic_created(topic.id))
         return JobOutcome("confirmed", topic.title)
 
     cand = asdict(result) | {"user_id": job["user_id"], "ts": now}
