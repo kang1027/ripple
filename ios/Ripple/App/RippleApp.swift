@@ -126,6 +126,21 @@ final class AppState {
         if path.isEmpty { tab = .radar }
     }
 
+    #if DEBUG
+    /// 캡처·테스트용. `-RippleOpen room:<id>` | `topic:<id>:<roomId>` | `tab:chats|nearby|me` 로 실행하면 그 화면으로 간다
+    private func openFromLaunchArgument() async {
+        guard let raw = UserDefaults.standard.string(forKey: "RippleOpen") else { return }
+        let parts = raw.split(separator: ":").map(String.init)
+        switch (parts.first, parts.count) {
+        case ("room", 2): await open(.room(id: parts[1]))
+        case ("topic", 3): await open(.topic(id: parts[1], roomId: parts[2]))
+        case ("tab", 2):
+            if let target = MainTab.allCases.first(where: { "\($0)" == parts[1] }) { tab = target }
+        default: break
+        }
+    }
+    #endif
+
     func bootstrap() async {
         guard TokenStore.shared.accessToken != nil else {
             phase = .signedOut
@@ -149,11 +164,21 @@ final class AppState {
             case "pending_profile": phase = .profile
             default:
                 phase = .ready
-                await PushService.shared.requestAndRegister()
+                // 알림 권한 팝업 응답을 기다리느라 알림 탭 이동이 막히지 않게 따로 돈다
+                #if DEBUG
+                // 캡처용 실행(-RippleOpen)에서는 알림 권한 팝업이 화면을 가리지 않게 묻지 않는다
+                let askPush = UserDefaults.standard.string(forKey: "RippleOpen") == nil
+                #else
+                let askPush = true
+                #endif
+                if askPush { Task { await PushService.shared.requestAndRegister() } }
                 if let route = pendingRoute {
                     pendingRoute = nil
                     await open(route)
                 }
+                #if DEBUG
+                await openFromLaunchArgument()
+                #endif
             }
         } catch {
             if phase == .loading { phase = .signedOut }
