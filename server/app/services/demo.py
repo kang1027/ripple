@@ -455,13 +455,15 @@ SEED_TOPICS: dict[str, dict] = {
 }
 
 # 사용자가 들어와 처음 말했을 때. (봇 번호, 대사, 앞 대사 뒤 몇 초)
-SCRIPT_GREETINGS = [(0, "안녕하세요! 반가워요 ㅎㅎ", 2.0), (1, "오 어서 오세요~", 2.5)]
+# 사용자 말은 분류(약 1.5초)를 거친 뒤에 대본이 시작되므로 간격은 짧게 둔다
+SCRIPT_GREETINGS = [(0, "안녕하세요! 반가워요 ㅎㅎ", 0.5), (1, "오 어서 오세요~", 1.0)]
 PROPOSER = 4
-PROPOSAL = ("다들 시간 괜찮으시면 영화 한 편 볼까요?", 5.5)
+PROPOSAL = ("다들 시간 괜찮으시면 영화 한 편 볼까요?", 1.5)
 # 제목이 그대로 들어가야 분류기가 사용자 말과 같은 주제로 묶어 토픽을 확정한다
-AGREE = ("오 {t} 좋아요! 저도 보고 싶었어요 ㅎㅎ", 3.0)
+AGREE = ("오 {t} 좋아요! 저도 보고 싶었어요 ㅎㅎ", 0.8)
 DECLINER = 3
-DECLINE = ("저는 이번 주엔 바빠서 힘들 것 같아요 ㅠㅠ 재밌게 보세요!", 9.0)
+# 토픽 카드가 뜬 뒤 몇 초
+DECLINE = ("저는 이번 주엔 바빠서 힘들 것 같아요 ㅠㅠ 재밌게 보세요!", 1.2)
 # 맞장구 뒤 이만큼 기다려도 토픽이 안 생기면(분류기가 안 묶음) 직접 확정한다
 CONFIRM_GRACE_S = 7.0
 LIVE_TOPIC_LINES = {
@@ -613,10 +615,10 @@ async def _script_room_step(job: dict, outcome: JobOutcome) -> None:
         text, wait = AGREE
         await _pause(wait)
         await _say(room_id, _bot(bots, PROPOSER), text.format(t=outcome.title), classify=True)
-        await _pause(CONFIRM_GRACE_S)
-        await _confirm_if_missing(room_id, job["user_id"], outcome.title)
+        if not await _wait_topic(room_id, outcome.title, CONFIRM_GRACE_S):
+            await _confirm_if_missing(room_id, job["user_id"], outcome.title)
         text, wait = DECLINE
-        await _pause(max(wait - CONFIRM_GRACE_S, 0))
+        await _pause(wait)
         await _say(room_id, _bot(bots, DECLINER), text)
         return
 
@@ -633,12 +635,25 @@ async def _script_room_step(job: dict, outcome: JobOutcome) -> None:
 
     # 대본 밖: 다른 주제를 말하면 평소처럼 봇이 같은 주제로 받아 준다
     if outcome.status == "candidate" and outcome.title:
-        await _pause(3)
+        await _pause(1.5)
         others = [b for b in bots if b != _bot(bots, PROPOSER)] or bots
         await _say(room_id, random.choice(others), random.choice(REPLY_BY_ENTITY).format(t=outcome.title), classify=True)
     elif outcome.status == "reminder":
-        await _pause(3)
+        await _pause(1.5)
         await _say(room_id, random.choice(bots), REMINDER_REPLY)
+
+
+async def _wait_topic(room_id: str, title: str, timeout: float) -> bool:
+    """분류기가 맞장구를 같은 주제로 묶어 토픽이 생길 때까지 기다린다. 생기면 바로 True."""
+    deadline = time.monotonic() + timeout * DELAY_SCALE
+    while True:
+        async with sessionmaker()() as session:
+            titles = (await session.execute(select(Topic.title).where(Topic.room_id == room_id))).scalars().all()
+        if any(same_topic(t, title) for t in titles):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        await asyncio.sleep(0.3)
 
 
 async def _confirm_if_missing(room_id: str, user_id: str, title: str) -> None:
@@ -702,7 +717,7 @@ async def _topic_step(job: dict) -> None:
         raw = await r.get(f"demo:welcome:{topic_id}")
         if raw:
             bot_id, text = json.loads(raw)
-            await _pause(2.5)
+            await _pause(1.0)
             await _say(room_id, bot_id if bot_id in bot_members else bot_members[0], text, topic_id=topic_id)
         return
 
@@ -712,7 +727,7 @@ async def _topic_step(job: dict) -> None:
     line = await r.lpop(f"demo:lines:{topic_id}")
     if line is None:
         return
-    await _pause(random.uniform(2.5, 4.0))
+    await _pause(random.uniform(1.0, 1.8))
     await _say(room_id, random.choice(bot_members), line, topic_id=topic_id)
 
 
