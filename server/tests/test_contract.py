@@ -161,3 +161,29 @@ def sent_pushes(monkeypatch):
 
     monkeypatch.setattr(apns, "send", fake_send)
     return calls
+
+
+def test_reply_preview_hidden_for_block_and_gone_after_delete(client):
+    a, b, room = _pair_in_room(client, LAT + 0.27)
+    c = onboard(client, _uniq("cc"), _phone())
+    _at(client, c, LAT + 0.27 + 0.00001)
+    assert client.post("/rooms/join", headers=auth(c)).json()["id"] == room
+    with client.websocket_connect(f"/ws/rooms/{room}?token={a}") as wa:
+        wa.send_json({"type": "send", "body": "a가 처음 한 말이에요"})
+        original = wa.receive_json()["message"]
+    with client.websocket_connect(f"/ws/rooms/{room}?token={b}") as wb:
+        wb.send_json({"type": "send", "body": "b의 답장이에요", "reply_to": original["id"]})
+        wb.receive_json()
+
+    def last_reply(token):
+        return client.get(f"/rooms/{room}/messages", headers=auth(token)).json()[-1]["reply"]
+
+    assert last_reply(c)["id"] == original["id"]
+    # c가 a를 차단하면 b 답장의 미리보기(a의 말)가 안 보인다
+    a_id = client.get("/me", headers=auth(a)).json()["id"]
+    client.post("/blocks", json={"user_id": a_id}, headers=auth(c))
+    assert last_reply(c) is None
+    # a가 탈퇴하면 미리보기가 모두에게서 사라진다
+    assert last_reply(b)["id"] == original["id"]
+    client.delete("/me", headers=auth(a))
+    assert last_reply(b) is None

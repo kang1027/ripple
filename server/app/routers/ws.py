@@ -91,8 +91,14 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
                 await ws.send_text(data if isinstance(data, str) else data.decode())
                 await ws.close(code=4403)
                 return
-            sender = (event.get("message") or {}).get("sender") or {}
+            message = event.get("message") or {}
+            sender = message.get("sender") or {}
             if sender.get("id") in hidden:
+                continue
+            reply = message.get("reply") or {}
+            if reply.get("sender_id") in hidden:
+                message["reply"] = None
+                await ws.send_text(json.dumps(event, ensure_ascii=False))
                 continue
             await ws.send_text(data if isinstance(data, str) else data.decode())
 

@@ -10,11 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
 from ..db import get_session
-from ..models import AuthIdentity, PushDevice, RoomMember, User, UserStatus
+from ..models import AuthIdentity, Message, PushDevice, RoomMember, User, UserStatus
 from ..redis_client import get_redis
 from ..schemas import ProfilePatchIn, UserOut, valid_avatar
 from ..security import current_user
 from ..services import notify, social
+from ..services.chat import forget_replies_to
 from ..services.text_filter import nickname_ok
 
 router = APIRouter(prefix="/me", tags=["me"])
@@ -107,6 +108,7 @@ async def delete_me(user: User = Depends(current_user), session: AsyncSession = 
             await social.apple_revoke(ident.apple_refresh_token)
     await session.execute(delete(AuthIdentity).where(AuthIdentity.user_id == user.id))
     await session.execute(delete(PushDevice).where(PushDevice.user_id == user.id))
+    await forget_replies_to(session, Message.user_id == user.id)
     now = datetime.now(timezone.utc)
     await session.execute(
         update(RoomMember)

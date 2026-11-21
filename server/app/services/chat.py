@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Block, Message, MessageType, Room, RoomMember, Topic, TopicMember, User
@@ -106,7 +106,10 @@ async def topic_out(session: AsyncSession, topic: Topic, user_id: str | None = N
     )
 
 
-async def serialize(session: AsyncSession, messages: list[Message]) -> list[MessageOut]:
+async def serialize(
+    session: AsyncSession, messages: list[Message], hidden: set[str] | None = None
+) -> list[MessageOut]:
+    """hidden: 보는 사람이 차단했거나 차단당한 사용자. 그 사람 말에 단 답장 미리보기는 숨긴다."""
     ids = {m.user_id for m in messages if m.user_id}
     users = {}
     if ids:
@@ -117,6 +120,8 @@ async def serialize(session: AsyncSession, messages: list[Message]) -> list[Mess
         u = users.get(m.user_id) if m.user_id else None
         sender = MemberBrief(id=u.id, nickname=u.nickname, avatar_url=u.avatar_url, avatar=u.avatar) if u else None
         reply = ReplyRef(**m.reply_snapshot) if m.reply_snapshot else None
+        if reply and hidden and reply.sender_id in hidden:
+            reply = None
         out.append(
             MessageOut(
                 id=m.id,
@@ -195,3 +200,12 @@ async def post_message(
             json.dumps({"room_id": room_id, "message_id": msg.id, "user_id": user.id, "body": text}),
         )
     return out
+
+
+async def forget_replies_to(session: AsyncSession, where) -> None:
+    """원본이 지워지거나(보관 기간) 작성자가 탈퇴하면 그 원본을 가리키던 답장 미리보기도 지운다.
+    where: 원본 메시지를 고르는 조건."""
+    originals = select(Message.id).where(where)
+    await session.execute(
+        update(Message).where(Message.reply_to_id.in_(originals)).values(reply_to_id=None, reply_snapshot=None)
+    )

@@ -17,7 +17,7 @@ from .db import create_all, sessionmaker
 from .models import Message, Room, RoomMember
 from .redis_client import get_redis
 from .services import demo, geo
-from .services.chat import TOPIC_JOBS
+from .services.chat import TOPIC_JOBS, forget_replies_to
 from .services.topics import process_job
 
 log = logging.getLogger("ripple.worker")
@@ -78,6 +78,7 @@ async def close_idle_rooms() -> int:
 async def expire_messages() -> None:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=get_settings().message_retention_h)
     async with sessionmaker()() as session:
+        await forget_replies_to(session, Message.created_at < cutoff)
         await session.execute(delete(Message).where(Message.created_at < cutoff))
         await session.commit()
 

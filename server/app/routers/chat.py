@@ -48,7 +48,7 @@ async def _messages(
     if hidden:
         q = q.where((Message.user_id.is_(None)) | (Message.user_id.not_in(hidden)))
     rows = (await session.execute(q.order_by(Message.id.desc()).limit(limit))).scalars().all()
-    return await serialize(session, list(reversed(rows)))
+    return await serialize(session, list(reversed(rows)), hidden)
 
 
 @router.get("/rooms/{room_id}", response_model=RoomOut)
