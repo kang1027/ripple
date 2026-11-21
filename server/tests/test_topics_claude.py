@@ -7,7 +7,7 @@ import anthropic
 import httpx
 
 from app.services.categories import CATEGORIES
-from app.services.topics import ClaudeClassifier, _ClaudeTopic
+from app.services.topics import ClaudeClassifier, _clean, _ClaudeTopic
 
 
 def _resp(parsed, stop="end_turn"):
@@ -57,3 +57,9 @@ def test_category_images_exist():
 
     folder = Path(__file__).resolve().parent.parent / "app" / "static" / "topics"
     assert all((folder / f"{k}.jpg").exists() for k in CATEGORIES)
+
+
+def test_clean_strips_html_tags():
+    assert _clean("같이 치킨을 시킬 사람을 모으는 이야기방이에요.</br>") == "같이 치킨을 시킬 사람을 모으는 이야기방이에요."
+    assert _clean("한강<br/>불꽃놀이") == "한강 불꽃놀이"
+    assert _clean('"성수 디올 팝업"') == "성수 디올 팝업"

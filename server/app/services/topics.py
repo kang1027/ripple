@@ -100,8 +100,10 @@ class _ClaudeTopic(BaseModel):
 
 
 def _clean(text: str) -> str:
-    """모델이 가끔 붙이는 따옴표·마크다운 꼬리를 떼어 낸다."""
+    """모델이 가끔 붙이는 따옴표·마크다운 꼬리와 HTML 태그(</br> 등)를 떼어 낸다."""
+    text = re.sub(r"<[^>]*>", " ", text)
     text = re.sub(r"\]\([^)]*\)", "", text)
+    text = re.sub(r"\s+", " ", text)
     return text.strip().strip("\"'“”‘’`[]()*").strip()
 
 
@@ -192,8 +194,8 @@ class LLMClassifier:
             return TopicResult(
                 bool(data.get("has_topic")),
                 cat,
-                str(data.get("title", ""))[:24],
-                str(data.get("summary", ""))[:60],
+                _clean(str(data.get("title", "")))[:24],
+                _clean(str(data.get("summary", "")))[:60],
             )
         except Exception as e:  # 모델이 죽어도 채팅은 계속
             log.warning("llm classify failed, fallback to rules: %s", e)
