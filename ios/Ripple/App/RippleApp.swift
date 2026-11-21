@@ -113,18 +113,16 @@ final class AppState {
         }
     }
 
+    /// 동네방에서 빠지면 그 방 화면만 닫는다. 토픽방은 장소를 떠나도 유지되므로 열려 있으면 그대로 둔다
     private func leaveRooms(_ ids: Set<String>) {
-        let inLeftRoom = path.contains { route in
-            switch route {
-            case .room(let r): return ids.contains(r.id)
-            case .topic(let t): return ids.contains(t.roomId)
-            case .settings: return false
-            }
+        let kept = path.filter { route in
+            if case .room(let r) = route { return !ids.contains(r.id) }
+            return true
         }
-        guard inLeftRoom else { return }
+        guard kept.count != path.count else { return }
         forward = false
-        path = []
-        tab = .radar
+        path = kept
+        if path.isEmpty { tab = .radar }
     }
 
     func bootstrap() async {

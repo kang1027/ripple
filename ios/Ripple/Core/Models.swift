@@ -12,6 +12,8 @@ struct UserOut: Decodable, Equatable {
     var nickname: String?
     var avatarUrl: String?
     var status: String
+    /// 캐릭터 꾸미기 값. 없으면 Avatar.derived(from: id)
+    var avatar: Avatar?
 }
 
 struct PresenceOut: Decodable {
@@ -27,12 +29,26 @@ struct NearbyOut: Decodable {
     let count: Int
     let avatars: [String?]
     let radiusM: Int
+    /// avatars와 같은 순서의 캐릭터 값 (옛 서버면 nil)
+    let characters: [Avatar?]?
+    /// 지금 위치 이름. 건물 이름이 있으면 건물, 없으면 동네
+    let areaName: String?
 }
 
 struct MemberBrief: Decodable, Hashable {
     let id: String
     let nickname: String?
     let avatarUrl: String?
+    let avatar: Avatar?
+}
+
+/// 답장 대상 메시지 요약 (원본이 지워져도 남는다)
+struct ReplyRef: Decodable, Hashable {
+    let id: Int
+    let senderId: String?
+    let nickname: String?
+    /// 원본 앞 80자
+    let body: String
 }
 
 struct RoomOut: Decodable, Hashable, Identifiable {
@@ -54,6 +70,11 @@ struct TopicOut: Decodable, Hashable, Identifiable {
     var memberCount: Int
     let lastMessageAt: Date
     var isMember: Bool
+    /// 토픽이 생긴 동네방 이름
+    let placeName: String?
+    let createdAt: Date?
+    /// 나 기준 알림 끄기 (옛 서버면 nil)
+    var muted: Bool?
 }
 
 /// 채팅 탭: 지금 들어가 있는 방 + 참여한 토픽
@@ -89,9 +110,10 @@ struct MessageOut: Decodable, Hashable, Identifiable {
     let sender: MemberBrief?
     let createdAt: Date
     let clientId: String?
+    let reply: ReplyRef?
 
     enum CodingKeys: String, CodingKey {
-        case id, roomId, topicId, type, body, meta, sender, createdAt, clientId
+        case id, roomId, topicId, type, body, meta, sender, createdAt, clientId, reply
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +128,7 @@ struct MessageOut: Decodable, Hashable, Identifiable {
         sender = try c.decodeIfPresent(MemberBrief.self, forKey: .sender)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         clientId = try c.decodeIfPresent(String.self, forKey: .clientId)
+        reply = try? c.decodeIfPresent(ReplyRef.self, forKey: .reply)
     }
 }
 
