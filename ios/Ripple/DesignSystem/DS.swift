@@ -310,6 +310,50 @@ extension View {
     }
 }
 
+/// 원격 이미지 메모리 캐시. 실패하면 잠깐 쉬었다가 두 번 더 받아 본다
+@MainActor
+final class ImageStore {
+    static let shared = ImageStore()
+    private let cache = NSCache<NSURL, UIImage>()
+
+    func cached(_ url: URL) -> UIImage? { cache.object(forKey: url as NSURL) }
+
+    func load(_ url: URL) async -> UIImage? {
+        if let image = cached(url) { return image }
+        for attempt in 0..<3 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(attempt)) }
+            if Task.isCancelled { return nil }
+            guard let (data, response) = try? await URLSession.shared.data(from: url) else { continue }
+            guard (response as? HTTPURLResponse)?.statusCode == 200, let image = UIImage(data: data) else { return nil }
+            cache.setObject(image, forKey: url as NSURL)
+            return image
+        }
+        return nil
+    }
+}
+
+/// AsyncImage는 LazyVStack 안에서 로딩이 취소되면 실패 상태로 굳어서 다시 안 받는다.
+/// 이건 화면에 다시 나타날 때마다(.task) 캐시를 보고 없으면 다시 받는다
+struct RemoteImage<Placeholder: View>: View {
+    let url: URL
+    @ViewBuilder var placeholder: () -> Placeholder
+    @State private var loaded: (url: URL, image: UIImage)?
+
+    var body: some View {
+        ZStack {
+            if let image = loaded?.url == url ? loaded?.image : ImageStore.shared.cached(url) {
+                Image(uiImage: image).resizable().scaledToFill().transition(.opacity)
+            } else {
+                placeholder()
+            }
+        }
+        .task(id: url) {
+            guard ImageStore.shared.cached(url) == nil, let image = await ImageStore.shared.load(url) else { return }
+            withAnimation(Motion.settle()) { loaded = (url, image) }
+        }
+    }
+}
+
 struct ShadAvatar: View {
     let url: String?
     var size: CGFloat = 36
@@ -317,13 +361,7 @@ struct ShadAvatar: View {
     var body: some View {
         Group {
             if let url, let u = URL(string: url) {
-                AsyncImage(url: u, transaction: Transaction(animation: Motion.settle())) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill().transition(.opacity)
-                    } else {
-                        placeholder
-                    }
-                }
+                RemoteImage(url: u) { placeholder }
             } else {
                 placeholder
             }
@@ -359,11 +397,7 @@ struct TopicImage: View {
             }
             .overlay {
                 if let url, let u = URL(string: url) {
-                    AsyncImage(url: u, transaction: Transaction(animation: Motion.settle())) { phase in
-                        if let image = phase.image {
-                            image.resizable().scaledToFill().transition(.opacity)
-                        }
-                    }
+                    RemoteImage(url: u) { Color.clear }
                 }
             }
             .clipped()
