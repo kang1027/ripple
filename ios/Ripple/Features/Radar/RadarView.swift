@@ -20,6 +20,8 @@ struct RadarView: View {
     @State private var pool = PoolSimulation()
     @State private var poolRect: CGRect = .zero
     @State private var myAvatar = AvatarStore.load()
+    @AppStorage("ripple.locationIntroSeen") private var introSeen = false
+    @State private var showIntro = false
 
     // 반경이 좁아서 멀어지고 다가오는 게 바로 보이도록 짧게 잡음. 위치 전송은 AppState.presenceLoop
     private let nearbyEvery: TimeInterval = 2
@@ -58,6 +60,19 @@ struct RadarView: View {
             syncPool()
         }
         .sheet(isPresented: $showJoin) { joinSheet }
+        .fullScreenCover(isPresented: $showIntro) {
+            LocationIntroView(
+                onAllow: {
+                    introSeen = true
+                    showIntro = false
+                    location.start()
+                },
+                onLater: {
+                    introSeen = true
+                    showIntro = false
+                }
+            )
+        }
         .task { await loop() }
     }
 
@@ -122,7 +137,7 @@ struct RadarView: View {
     }
 
     private var placeLine: String {
-        if locationDenied { return "위치를 확인할 수 없어요" }
+        if locationDenied || location.authorization == .notDetermined { return "위치를 확인할 수 없어요" }
         if location.location == nil { return "위치를 확인하는 중이에요" }
         return areaName ?? "내 주변 \(radiusM)m"
     }
@@ -144,7 +159,9 @@ struct RadarView: View {
             .foregroundStyle(Theme.Water.lettering.opacity(0.75))
             .allowsHitTesting(false)
 
-            if locationDenied {
+            if location.authorization == .notDetermined {
+                WaterButton(title: "위치 허용하기", systemImage: nil) { location.start() }
+            } else if locationDenied {
                 WaterButton(title: "설정에서 위치 켜기", systemImage: nil) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
@@ -159,7 +176,7 @@ struct RadarView: View {
     }
 
     private var statusLine: String {
-        if locationDenied { return "위치를 켜면 근처에 있는 사람들이 물에 들어와요" }
+        if locationDenied || location.authorization == .notDetermined { return "위치를 켜면 근처에 있는 사람들이 물에 들어와요" }
         if location.location == nil { return "위치를 확인하는 중이에요" }
         if count == 0 { return "아직 혼자 떠 있어요" }
         return "주변에 \(count)명이 함께 떠 있어요"
@@ -247,7 +264,12 @@ struct RadarView: View {
     // MARK: 데이터
 
     private func loop() async {
-        location.start()
+        // 아직 위치를 물어보지 않았으면 안내 화면을 먼저 보여주고, 허용을 누를 때 시스템 권한을 묻는다
+        if location.authorization == .notDetermined && !introSeen {
+            showIntro = true
+        } else if location.authorization != .notDetermined || introSeen {
+            location.start()
+        }
         var lastNearby = Date.distantPast
         while !Task.isCancelled {
             if location.location != nil, !location.isBackground {
