@@ -190,7 +190,11 @@ struct RadarView: View {
             Button {
                 Haptics.tap()
                 showJoin = false
-                Task { await join() }
+                // 시트가 다 내려간 뒤에 전환 원이 퍼지게
+                Task {
+                    try? await Task.sleep(for: .milliseconds(320))
+                    await join()
+                }
             } label: {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("지금 이곳 · ripplers \(count + 1)명")
@@ -230,7 +234,10 @@ struct RadarView: View {
                             Button {
                                 Haptics.tap()
                                 showJoin = false
-                                Task { await join(topic: topic) }
+                                Task {
+                                    try? await Task.sleep(for: .milliseconds(320))
+                                    await join(topic: topic)
+                                }
                             } label: {
                                 HStack(spacing: 12) {
                                     TopicImage(url: topic.imageUrl, category: topic.category)
@@ -360,7 +367,7 @@ struct RadarView: View {
         do {
             let room: RoomOut = try await app.api.request("POST", "/rooms/join")
             let joined: TopicOut = try await app.api.request("POST", "/topics/\(topic.id)/join")
-            WaveTransition.shared.go { app.path = [.room(room), .topic(joined)] }
+            WaveTransition.shared.push { app.path = [.room(room), .topic(joined)] }
         } catch {
             self.error = "이 토픽방은 지금 들어갈 수 없어요. 리플에 먼저 참여해 주세요"
         }
@@ -377,7 +384,7 @@ struct RadarView: View {
         }
         do {
             let room: RoomOut = try await app.api.request("POST", "/rooms/join")
-            WaveTransition.shared.go { app.path.append(.room(room)) }
+            WaveTransition.shared.push { app.path.append(.room(room)) }
         } catch {
             self.error = error.localizedDescription
         }

@@ -15,7 +15,17 @@ final class WaveTransition {
     /// 마지막으로 누른 자리 (화면 좌표). 원이 여기서 퍼진다
     var lastTap: CGPoint?
 
-    func go(from point: CGPoint? = nil, _ action: @escaping @MainActor () async -> Void) {
+    /// 화면 이동(내비게이션 경로 바꾸기). 원이 덮은 동안 밀려 들어오는 애니메이션 없이 바로 바꾼다
+    func push(from point: CGPoint? = nil, _ change: @escaping @MainActor () -> Void) {
+        go(from: point, settle: .milliseconds(160)) {
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { change() }
+        }
+    }
+
+    /// 원이 덮은 뒤 action을 하고, settle만큼 새 화면이 자리 잡기를 기다렸다가 걷어낸다
+    func go(from point: CGPoint? = nil, settle: Duration = .milliseconds(160), _ action: @escaping @MainActor () async -> Void) {
         if active || UIAccessibility.isReduceMotionEnabled {
             Task { await action() }
             return
@@ -32,9 +42,8 @@ final class WaveTransition {
         } completion: {
             Task { @MainActor in
                 await action()
-                // 새 화면이 자리 잡은 뒤에 걷어낸다
-                try? await Task.sleep(for: .milliseconds(140))
-                withAnimation(.easeOut(duration: 0.22)) {
+                try? await Task.sleep(for: settle)
+                withAnimation(.easeOut(duration: 0.24)) {
                     self.opacity = 0
                 } completion: {
                     self.active = false
