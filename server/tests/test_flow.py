@@ -261,3 +261,23 @@ def test_leave_and_rejoin_same_room(client, monkeypatch):
     # 직접 '나가기'를 누른 방은 다가와도 자동으로 안 들어간다
     client.post(f"/rooms/{room}/leave", headers=auth(walker))
     assert at(walker, lat + 2 * step)["joined_rooms"] == []
+
+
+def test_dev_login_blocked_in_prod(client, monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "env", "prod")
+    assert client.post("/auth/dev", json={"name": "x"}).status_code == 404
+
+
+def test_former_member_cannot_read_room(client, monkeypatch):
+    from app.config import get_settings
+
+    a = onboard(client, _uniq("ra"), _phone())
+    lat = LAT - 0.13
+    assert client.post("/presence", json={"lat": lat, "lng": LNG, "accuracy": 5}, headers=auth(a)).json()["ok"]
+    room = client.post("/rooms/join", headers=auth(a)).json()["id"]
+    assert client.get(f"/rooms/{room}/messages", headers=auth(a)).status_code == 200
+    client.post(f"/rooms/{room}/leave", headers=auth(a))
+    assert client.get(f"/rooms/{room}/messages", headers=auth(a)).status_code == 403
+    assert client.get(f"/rooms/{room}", headers=auth(a)).json()["read_only"] is True

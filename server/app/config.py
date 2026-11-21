@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     access_ttl_minutes: int = 60 * 24
     refresh_ttl_days: int = 30
 
-    # 개발용 로그인 (시뮬레이터·테스트·데모). 운영에서는 반드시 false
-    allow_dev_login: bool = True
+    # 개발용 로그인 (시뮬레이터·테스트). 기본 꺼짐, ENV=prod면 켜도 막힘
+    allow_dev_login: bool = False
 
     # Kakao
     kakao_app_id: int | None = None  # 내 앱 ID. 설정하면 토큰의 app_id와 비교

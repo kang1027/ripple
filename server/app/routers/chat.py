@@ -24,11 +24,15 @@ from ..services.chat import (
 router = APIRouter(tags=["chat"])
 
 
-async def _room_for_reader(session: AsyncSession, room_id: str, user: User) -> Room:
+async def _room_for_reader(session: AsyncSession, room_id: str, user: User, *, active: bool = True) -> Room:
+    """active=True면 지금 참여 중인 사람만. 범위를 벗어나 빠진 사람은 다시 들어오기 전까지 대화를 못 본다."""
     room = await session.get(Room, room_id)
     if room is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "room_not_found")
-    if not await ever_member(session, room_id, user.id):
+    if active:
+        if await active_membership(session, room_id, user.id) is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "not_in_room")
+    elif not await ever_member(session, room_id, user.id):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "not_a_member")
     return room
 
@@ -49,7 +53,7 @@ async def _messages(
 
 @router.get("/rooms/{room_id}", response_model=RoomOut)
 async def get_room(room_id: str, user: User = Depends(active_user), session: AsyncSession = Depends(get_session)):
-    room = await _room_for_reader(session, room_id, user)
+    room = await _room_for_reader(session, room_id, user, active=False)
     return await room_out(session, room, user.id)
 
 

@@ -41,7 +41,7 @@ def _jwks() -> jwt.PyJWKClient:
     return _apple_jwks
 
 
-def verify_apple(identity_token: str, raw_nonce: str | None) -> str:
+def verify_apple(identity_token: str, raw_nonce: str) -> str:
     """Apple identityToken(JWT) 검증 → Apple 사용자 ID(sub)."""
     s = get_settings()
     try:
@@ -55,7 +55,7 @@ def verify_apple(identity_token: str, raw_nonce: str | None) -> str:
         )
     except jwt.PyJWTError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "apple_token_invalid")
-    if raw_nonce is not None and claims.get("nonce") != sha256_hex(raw_nonce):
+    if claims.get("nonce") != sha256_hex(raw_nonce):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "apple_nonce_mismatch")
     return claims["sub"]
 

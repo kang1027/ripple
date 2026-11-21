@@ -16,7 +16,7 @@ class KakaoLoginIn(BaseModel):
 
 class AppleLoginIn(BaseModel):
     identity_token: str
-    raw_nonce: str | None = None
+    raw_nonce: str = Field(min_length=16, max_length=128)  # 앱이 만든 원본 nonce. 토큰의 nonce는 이 값의 sha256
     authorization_code: str | None = None
 
 

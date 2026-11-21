@@ -75,7 +75,8 @@ async def login_apple(body: AppleLoginIn, session: AsyncSession = Depends(get_se
 @router.post("/dev", response_model=TokenOut)
 async def login_dev(body: DevLoginIn, session: AsyncSession = Depends(get_session)):
     """시뮬레이터·테스트용. ALLOW_DEV_LOGIN=false 이면 비활성."""
-    if not get_settings().allow_dev_login:
+    s = get_settings()
+    if not s.allow_dev_login or s.env == "prod":
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     user, is_new, _ = await _login(session, "dev", body.name)
     await session.commit()

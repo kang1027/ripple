@@ -18,7 +18,6 @@ from ..services import notify
 from ..services.chat import (
     active_membership,
     blocked_ids,
-    ever_member,
     is_topic_member,
     post_message,
     room_channel,
@@ -37,7 +36,7 @@ async def _authorize(kind: str, target_id: str, token: str) -> tuple[User, str, 
         except HTTPException:
             return None
         if kind == "room":
-            if not await ever_member(session, target_id, user.id):
+            if await active_membership(session, target_id, user.id) is None:
                 return None
             return user, target_id, None
         topic = await session.get(Topic, target_id)
