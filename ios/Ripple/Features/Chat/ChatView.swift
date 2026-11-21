@@ -5,10 +5,25 @@ enum ChatKind: Hashable {
     case topic(TopicOut)
 }
 
+/// 답장 대상 (서버가 reply 필드를 내려주기 전에는 보낼 때 고른 메시지로 화면에만 그린다)
+struct ReplyTarget: Hashable {
+    let id: Int
+    let nickname: String
+    let body: String
+}
+
+extension ReplyTarget {
+    init?(_ ref: ReplyRef?) {
+        guard let ref else { return nil }
+        self.init(id: ref.id, nickname: ref.nickname ?? "알 수 없음", body: ref.body)
+    }
+}
+
 /// 보냈지만 서버가 아직 돌려주지 않은 내 메시지
 struct PendingMessage: Hashable {
     let clientId: String
     let body: String
+    var reply: ReplyTarget?
     var failed = false
 }
 
@@ -30,6 +45,12 @@ final class ChatViewModel {
     var draft = ""
     var readOnly = false
     var error: String?
+    var replyTo: ReplyTarget?
+    /// 내가 보낸 메시지의 답장 대상. 서버가 reply를 돌려주기 전까지 말풍선에 인용을 그리는 데 쓴다
+    var sentReplies: [String: ReplyTarget] = [:]
+    /// 아래쪽을 보고 있지 않을 때 새로 온 메시지 수
+    var unseen = 0
+    var atBottom = true
 
     private let api = APIClient.shared
     private let ws = WebSocketClient()
@@ -46,14 +67,14 @@ final class ChatViewModel {
         }
     }
 
+    var topic: TopicOut? {
+        if case .topic(let t) = kind { return t }
+        return nil
+    }
+
     var items: [ChatItem] {
         messages.map { ChatItem(id: $0.clientId ?? "m\($0.id)", message: $0, pending: nil) }
             + pending.map { ChatItem(id: $0.clientId, message: nil, pending: $0) }
-    }
-
-    var title: String {
-        if case .topic(let t) = kind { return t.title }
-        return room?.areaName ?? ""
     }
 
     func load() async {
@@ -93,20 +114,25 @@ final class ChatViewModel {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let cid = UUID().uuidString
+        let reply = replyTo
         draft = ""
-        withAnimation(Motion.bubble) { pending.append(PendingMessage(clientId: cid, body: text)) }
-        transmit(cid, text)
+        replyTo = nil
+        if let reply { sentReplies[cid] = reply }
+        withAnimation(Motion.bubble) { pending.append(PendingMessage(clientId: cid, body: text, reply: reply)) }
+        transmit(cid, text, reply: reply)
     }
 
     func retry(_ item: PendingMessage) {
         guard let i = pending.firstIndex(where: { $0.clientId == item.clientId }) else { return }
         withAnimation(Motion.settle()) { pending[i].failed = false }
-        transmit(item.clientId, item.body)
+        transmit(item.clientId, item.body, reply: item.reply)
     }
 
     /// 보내고 8초 안에 서버가 돌려주지 않으면 실패로 표시
-    private func transmit(_ cid: String, _ text: String) {
-        ws.send(["type": "send", "body": text, "client_id": cid])
+    private func transmit(_ cid: String, _ text: String, reply: ReplyTarget?) {
+        var payload: [String: Any] = ["type": "send", "body": text, "client_id": cid]
+        if let reply { payload["reply_to"] = reply.id }
+        ws.send(payload)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(8))
             guard let self, let i = self.pending.firstIndex(where: { $0.clientId == cid }) else { return }
@@ -125,10 +151,12 @@ final class ChatViewModel {
         switch event.type {
         case "message":
             if let m = event.message, !messages.contains(where: { $0.id == m.id }) {
+                let mine = m.clientId.map { cid in pending.contains { $0.clientId == cid } } ?? false
                 withAnimation(Motion.bubble) {
                     if let cid = m.clientId { pending.removeAll { $0.clientId == cid } }
                     messages.append(m)
                 }
+                if !mine && !atBottom { unseen += 1 }
                 if m.type == MessageType.topicCard { Haptics.success() }
             }
         case "members":
@@ -190,41 +218,52 @@ enum TokenStoreUser {
 
 struct ChatView: View {
     @Environment(AppState.self) private var app
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppearanceKey.chatSize) private var chatSizeRaw = ChatTextSize.medium.rawValue
     @State private var vm: ChatViewModel
     @State private var showTopics = false
+    @State private var showSettings = false
+    @State private var showShare = false
+    @State private var actionTarget: MessageOut?
+    @State private var jumpHighlight: Int?
+    @State private var notice: String?
+    @State private var myAvatar = AvatarStore.load()
+    @FocusState private var inputFocused: Bool
 
     init(kind: ChatKind) {
         _vm = State(initialValue: ChatViewModel(kind: kind))
     }
 
+    private var chatSize: CGFloat { (ChatTextSize(rawValue: chatSizeRaw) ?? .medium).points }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(vm.items) { item in
-                        itemRow(item).id(item.id)
-                    }
-                }
-                .padding(16)
-            }
-            // 키보드가 올라와도 마지막 메시지가 아래에 붙어 있게
-            .defaultScrollAnchor(.bottom)
-            .scrollDismissesKeyboard(.interactively)
-            .onChange(of: vm.items.count) {
-                if let last = vm.items.last { withAnimation(Motion.bubble) { proxy.scrollTo(last.id, anchor: .bottom) } }
-            }
+        VStack(spacing: 0) {
+            header
+            messagesList
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                Rectangle().fill(Theme.border).frame(height: 1)
-                inputBar
-            }
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar }
+        .background(Theme.background)
+        .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
+        .toolbar(.hidden, for: .navigationBar)
+        .overlay(alignment: .top) { noticeView }
         .sheet(isPresented: $showTopics) { topicSheet }
+        .sheet(isPresented: $showSettings) {
+            ChatSettingsSheet(onLeave: isRoom ? { Task { await leaveRoom() } } : nil)
+        }
+        .sheet(item: $actionTarget) { m in
+            MessageActionSheet(
+                message: m,
+                isMine: m.sender?.id == app.me?.id,
+                onReply: { startReply(m) },
+                onReport: { await vm.report(m) },
+                onBlock: { if let id = m.sender?.id { await vm.block(id) } }
+            )
+        }
+        .fullScreenCover(isPresented: $showShare) {
+            if let topic = vm.topic { StoryShareView(topic: topic, place: vm.room?.areaName ?? "") }
+        }
         .task {
             TokenStoreUser.id = app.me?.id
+            myAvatar = app.me?.avatar ?? AvatarStore.load()
             await vm.load()
         }
         .onDisappear {
@@ -233,140 +272,220 @@ struct ChatView: View {
         }
     }
 
+    private var isRoom: Bool { if case .room = vm.kind { return true } else { return false } }
+
     // MARK: 헤더
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        if case .room = vm.kind {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { Task { await vm.reloadTopics() }; showTopics = true } label: {
-                    Image(systemName: "line.3.horizontal")
+    private var header: some View {
+        HStack(spacing: 12) {
+            CircleIconButton(systemName: "arrow.left", label: "뒤로") { dismiss() }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .appFont(17, .heavy)
+                    .foregroundStyle(Theme.foreground)
+                    .lineLimit(1)
+                if let subtitle {
+                    Text(subtitle)
+                        .appFont(12)
+                        .foregroundStyle(Theme.mutedForeground)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
                 }
             }
-        }
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 2) {
-                if case .topic = vm.kind {
-                    Text(vm.title).font(.subheadline.bold())
-                } else {
-                    ShadAvatarStack(urls: vm.room?.avatars ?? [], size: 20)
-                }
-                Text("\(vm.room?.memberCount ?? 0)명 · \(vm.room?.areaName ?? "")")
-                    .font(.caption2).foregroundStyle(Theme.mutedForeground)
-            }
-        }
-        if case .room = vm.kind {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("방 나가기", role: .destructive) {
-                        Task {
-                            await vm.leave()
-                            app.path.removeAll()
-                        }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 4) {
+                if isRoom {
+                    CircleIconButton(systemName: "list.bullet", label: "진행 중인 토픽") {
+                        Task { await vm.reloadTopics() }
+                        showTopics = true
                     }
-                } label: { Image(systemName: "ellipsis") }
+                }
+                CircleIconButton(systemName: "slider.horizontal.3", label: "대화 화면 설정") { showSettings = true }
+                if !isRoom {
+                    CircleIconButton(systemName: "square.and.arrow.up", label: "방 공유") { showShare = true }
+                }
             }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var title: String {
+        if let t = vm.topic { return TopicTitle.hashtag(t.title) }
+        return "\(RoomName.short(vm.room?.areaName)) 리플"
+    }
+
+    private var subtitle: String? {
+        if isRoom { return "\(vm.room?.memberCount ?? 0)명 · 지금 이곳에서 나누는 이야기" }
+        return nil
+    }
+
+    // MARK: 메시지 목록
+
+    private var messagesList: some View {
+        GeometryReader { geo in
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if let topic = vm.topic { topicIntro(topic) }
+                    ForEach(vm.items) { item in
+                        itemRow(item)
+                            .id(item.id)
+                            .background(jumpHighlight != nil && item.message?.id == jumpHighlight ? Theme.primarySoft : .clear)
+                            .animation(.easeOut(duration: 1.2), value: jumpHighlight)
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                        .onAppear { vm.atBottom = true; vm.unseen = 0 }
+                        .onDisappear { vm.atBottom = false }
+                }
+                .padding(.vertical, 12)
+                // 대화가 짧으면 위에서부터 쌓이고, 길어지면 아래에 붙는다
+                .frame(minHeight: geo.size.height, alignment: .top)
+            }
+            .clipped()
+            // 키보드가 올라와도 마지막 메시지가 아래에 붙어 있게
+            .defaultScrollAnchor(.bottom)
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: vm.items.count) { old, new in
+                guard new > old, let last = vm.items.last else { return }
+                // 내가 보냈거나 이미 아래를 보고 있을 때만 따라 내려간다
+                if last.pending != nil || vm.atBottom {
+                    withAnimation(Motion.bubble) { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+            .onChange(of: jumpRequest) { _, id in
+                guard let id else { return }
+                withAnimation(Motion.settle(0.4)) { proxy.scrollTo(id, anchor: .center) }
+                jumpRequest = nil
+            }
+            .overlay(alignment: .bottom) {
+                if vm.unseen > 0 {
+                    Button {
+                        withAnimation(Motion.settle(0.4)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                        vm.unseen = 0
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("새 메시지 \(vm.unseen)개")
+                            Image(systemName: "arrow.down").font(.system(size: 11, weight: .bold))
+                        }
+                        .appFont(12, .bold)
+                        .foregroundStyle(Theme.background)
+                        .padding(.horizontal, 14)
+                        .frame(height: 32)
+                        .background(Capsule().fill(Theme.foreground))
+                    }
+                    .buttonStyle(PressStyle())
+                    .padding(.bottom, 12)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(Motion.settle(), value: vm.unseen > 0)
+        }
         }
     }
 
-    // MARK: 메시지
+    @State private var jumpRequest: String?
+
+    private func topicIntro(_ topic: TopicOut) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TopicCover(topic: topic, height: 112)
+            Text("\(topic.createdAt.map { "생성 " + DateText.full($0) } ?? (vm.room?.areaName ?? "")) · \(topic.memberCount)명")
+                .appFont(12, .medium)
+                .foregroundStyle(Theme.mutedForeground)
+                .padding(.top, 12)
+            HStack(spacing: 4) {
+                Image(systemName: "mappin").font(.system(size: 10, weight: .semibold))
+                Text("\(RoomName.short(topic.placeName ?? vm.room?.areaName))에서 시작된 \(TopicTitle.hashtag(topic.title)) 이야기")
+            }
+            .appFont(12)
+            .foregroundStyle(Theme.mutedForeground)
+            .padding(.top, 4)
+            Text("장소를 떠나도 계속 이야기할 수 있어요")
+                .appFont(12, .semibold)
+                .foregroundStyle(Theme.primary)
+                .padding(.top, 8)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 4)
+    }
 
     /// 보내는 중(pending)과 보낸 내 메시지는 같은 분기로 그려야 확인될 때 말풍선이 다시 튀지 않음
     @ViewBuilder
     private func itemRow(_ item: ChatItem) -> some View {
-        if let own = ownContent(item) {
-            ownBubble(own.text, sending: own.sending, failed: own.failed) {
-                if let p = item.pending { vm.retry(p) }
-            }
+        if let p = item.pending {
+            MessageRow(
+                nickname: myNickname, isMine: true, avatar: myAvatar, text: p.body, reply: p.reply,
+                textSize: chatSize, sending: !p.failed, failed: p.failed,
+                onRetry: { vm.retry(p) }, onReply: nil, onLongPress: nil, onQuoteTap: { jump(to: p.reply) }
+            )
             .transition(.bubbleIn(from: .bottomTrailing))
         } else if let m = item.message {
-            row(m)
+            row(m, item: item)
         }
     }
 
-    private func ownContent(_ item: ChatItem) -> (text: String, sending: Bool, failed: Bool)? {
-        if let p = item.pending { return (p.body, !p.failed, p.failed) }
-        guard let m = item.message, m.type != MessageType.topicCard, m.type != MessageType.system,
-              m.sender != nil, m.sender?.id == app.me?.id else { return nil }
-        return (m.body, false, false)
-    }
-
-    /// 내 말풍선. 보내는 중엔 흐리게, 실패하면 다시 보내기 표시
-    private func ownBubble(_ text: String, sending: Bool = false, failed: Bool = false, retry: (() -> Void)? = nil) -> some View {
-        HStack(alignment: .bottom, spacing: 6) {
-            Spacer(minLength: 60)
-            if failed {
-                Button {
-                    Haptics.tap()
-                    retry?()
-                } label: {
-                    Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.destructive)
-                }
-                .buttonStyle(PressStyle(scale: 0.85))
-                .accessibilityLabel("다시 보내기")
-                .transition(.scale(scale: 0.4).combined(with: .opacity))
-            }
-            Text(text)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .foregroundStyle(Theme.primaryForeground)
-                .background(Theme.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .opacity(sending ? 0.55 : 1)
-        }
-        .animation(Motion.settle(), value: sending)
-        .animation(Motion.pop, value: failed)
-    }
+    private var myNickname: String { app.me?.nickname ?? "나" }
 
     @ViewBuilder
-    private func row(_ m: MessageOut) -> some View {
+    private func row(_ m: MessageOut, item: ChatItem) -> some View {
         if m.type == MessageType.topicCard, let meta = m.meta {
-            topicCard(meta)
-                .transition(.bubbleIn(from: .bottom, scale: 0.9))
+            BotReplyRow(
+                meta: meta,
+                quote: ReplyTarget(m.reply),
+                isMember: vm.isMember(meta.topicId),
+                memberCount: vm.topics.first { $0.id == meta.topicId }?.memberCount ?? meta.memberCount,
+                textSize: chatSize
+            ) {
+                Task { await openTopic(meta.topicId) }
+            }
+            .transition(.bubbleIn(from: .bottomLeading, scale: 0.9))
         } else if m.type == MessageType.system || m.sender == nil {
-            Text(m.body).font(.caption).foregroundStyle(Theme.mutedForeground).frame(maxWidth: .infinity)
+            Text(m.body)
+                .appFont(12)
+                .foregroundStyle(Theme.mutedForeground)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24)
                 .transition(.opacity)
         } else {
-            HStack(alignment: .top, spacing: 8) {
-                ShadAvatar(url: m.sender?.avatarUrl, size: 32)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(m.sender?.nickname ?? "알 수 없음").font(.caption).foregroundStyle(Theme.mutedForeground)
-                    Text(m.body)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(Theme.muted)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                Spacer(minLength: 40)
-            }
-            .transition(.bubbleIn(from: .bottomLeading))
-            .contextMenu {
-                Button("신고하기") { Task { await vm.report(m) } }
-                if let uid = m.sender?.id {
-                    Button("차단하기", role: .destructive) { Task { await vm.block(uid) } }
-                }
-            }
+            let mine = m.sender?.id == app.me?.id
+            let sender = m.sender
+            let reply = ReplyTarget(m.reply) ?? (mine ? m.clientId.flatMap { vm.sentReplies[$0] } : nil)
+            MessageRow(
+                nickname: sender?.nickname ?? "알 수 없음",
+                isMine: mine,
+                avatar: mine ? myAvatar : (sender?.avatar ?? Avatar.derived(from: sender?.id ?? "unknown")),
+                text: m.body,
+                reply: reply,
+                textSize: chatSize,
+                onReply: { startReply(m) },
+                onLongPress: { actionTarget = m },
+                onQuoteTap: { jump(to: reply) }
+            )
+            .transition(.bubbleIn(from: mine ? .bottomTrailing : .bottomLeading))
         }
     }
 
-    private func topicCard(_ meta: TopicMeta) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(meta.reminder == true ? "토픽 봇 · 진행 중인 토픽" : "토픽 봇 · 새 토픽")
-                .font(.caption).foregroundStyle(Theme.mutedForeground)
-            ShadCard {
-                TopicImage(url: meta.imageUrl, category: meta.category, iconFont: .title2)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 120)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                Text(meta.title).font(.headline)
-                Text(meta.summary).font(.subheadline).foregroundStyle(Theme.mutedForeground)
-                let count = vm.topics.first { $0.id == meta.topicId }?.memberCount ?? meta.memberCount
-                Text("\(count)명 참여 중").font(.caption).foregroundStyle(Theme.mutedForeground)
-                // 주제를 꺼낸 사람·반응한 사람은 자동 참여. 나머지는 '참여하기'를 눌러야 내 토픽에 들어간다
-                ShadButton(title: vm.isMember(meta.topicId) ? "채팅하기" : "참여하기") {
-                    Task { await openTopic(meta.topicId) }
-                }
-            }
+    private func startReply(_ m: MessageOut) {
+        guard !vm.readOnly else { return }
+        Haptics.select()
+        vm.replyTo = ReplyTarget(id: m.id, nickname: m.sender?.nickname ?? "알 수 없음", body: m.body)
+        inputFocused = true
+    }
+
+    private func jump(to reply: ReplyTarget?) {
+        guard let reply else { return }
+        guard let target = vm.messages.first(where: { $0.id == reply.id }) else {
+            show("원문을 볼 수 없어요")
+            return
+        }
+        jumpRequest = target.clientId ?? "m\(target.id)"
+        jumpHighlight = target.id
+        Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            jumpHighlight = nil
         }
     }
 
@@ -377,53 +496,126 @@ struct ChatView: View {
         }
     }
 
+    private func leaveRoom() async {
+        await vm.leave()
+        app.path.removeAll()
+    }
+
+    // MARK: 알림 한 줄
+
+    @ViewBuilder
+    private var noticeView: some View {
+        if let notice {
+            Text(notice)
+                .appFont(13, .semibold)
+                .foregroundStyle(Theme.background)
+                .padding(.horizontal, 16)
+                .frame(height: 36)
+                .background(Capsule().fill(Theme.foreground))
+                .padding(.top, 72)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private func show(_ text: String) {
+        withAnimation(Motion.settle()) { notice = text }
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(Motion.settle()) { if notice == text { notice = nil } }
+        }
+    }
+
     // MARK: 토픽 목록 시트
 
     private var topicSheet: some View {
-        NavigationStack {
-            List(vm.topics) { t in
-                Button {
-                    Task { await openTopic(t.id) }
-                } label: {
-                    HStack(spacing: 12) {
-                        TopicImage(url: t.imageUrl, category: t.category)
-                            .frame(width: 40, height: 40)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(t.title).foregroundStyle(Theme.foreground)
-                            Text("\(t.memberCount)명 · \(t.lastMessageAt.formatted(.relative(presentation: .named)))")
-                                .font(.caption).foregroundStyle(Theme.mutedForeground)
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: "진행 중인 토픽") { showTopics = false }
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(vm.topics) { t in
+                        Button { Task { await openTopic(t.id) } } label: {
+                            TopicRoomRow(topic: t, place: vm.room?.areaName)
                         }
-                        Spacer()
-                        if !t.isMember {
-                            Text("참여하기").font(.caption.weight(.medium)).foregroundStyle(Theme.foreground)
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
-                        }
+                        .buttonStyle(PressStyle(scale: 0.98))
+                    }
+                    if vm.topics.isEmpty {
+                        EmptyState(title: "아직 토픽이 없어요", message: "대화에서 같은 이야기가 이어지면 Ripple 봇이 토픽방을 열어 줘요")
                     }
                 }
+                .padding(.top, 16)
             }
-            .listStyle(.plain)
-            .overlay { if vm.topics.isEmpty { Text("아직 토픽이 없어요").foregroundStyle(Theme.mutedForeground) } }
-            .navigationTitle("진행 중인 토픽")
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .presentationDetents([.medium, .large])
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .rippleSheet(detents: [.medium, .large])
     }
 
     // MARK: 입력창
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField(vm.readOnly ? "방 범위를 벗어나 읽기만 가능해요" : "메시지 입력", text: $vm.draft, axis: .vertical)
-                .lineLimit(1...4)
-                .padding(.horizontal, 14).padding(.vertical, 10)
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Theme.border, lineWidth: 1))
-                .disabled(vm.readOnly)
-            SendButton(enabled: !vm.readOnly && !vm.draft.trimmingCharacters(in: .whitespaces).isEmpty, action: vm.send)
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+            HStack(alignment: .bottom, spacing: 8) {
+                VStack(spacing: 0) {
+                    if let reply = vm.replyTo {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(reply.nickname)에게 답장")
+                                    .appFont(11, .semibold)
+                                    .foregroundStyle(Theme.foreground)
+                                Text(reply.body)
+                                    .appFont(12)
+                                    .foregroundStyle(Theme.mutedForeground)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                withAnimation(Motion.settle()) { vm.replyTo = nil }
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Theme.mutedForeground)
+                                    .frame(width: 28, height: 28)
+                            }
+                            .accessibilityLabel("답장 취소")
+                        }
+                        .padding(.top, 12)
+                        .padding(.bottom, 8)
+                        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+                        .padding(.horizontal, 16)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                    TextField(vm.readOnly ? "범위를 벗어나서 읽기만 할 수 있어요" : "메시지 보내기", text: $vm.draft, axis: .vertical)
+                        .font(AppFont.size(chatSize))
+                        .lineLimit(1...4)
+                        .focused($inputFocused)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 13)
+                        .frame(minHeight: 48)
+                        .disabled(vm.readOnly)
+                }
+                .background(RoundedRectangle(cornerRadius: Theme.Radius.xxl).fill(Theme.secondary))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.xxl)
+                        .stroke(inputFocused ? Theme.primary : .clear, lineWidth: 1)
+                )
+                .animation(Motion.settle(), value: vm.replyTo)
+                SendButton(enabled: !vm.readOnly && !vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action: vm.send)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.background)
+    }
+}
+
+/// 동네 이름에서 "근처"를 뗀 짧은 이름 ("홍지동 근처" → "홍지동")
+enum RoomName {
+    static func short(_ area: String?) -> String {
+        guard let area, !area.isEmpty else { return "이곳" }
+        let trimmed = area.replacingOccurrences(of: " 근처", with: "")
+        return trimmed == "이" ? "이곳" : trimmed
     }
 }
 
@@ -446,8 +638,8 @@ private struct SendButton: View {
             if !reduceMotion { flights += 1 }
             action()
         } label: {
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 15, weight: .semibold))
+            Image(systemName: "paperplane")
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(enabled ? Theme.primaryForeground : Theme.mutedForeground)
                 .keyframeAnimator(initialValue: Flight(), trigger: flights) { view, f in
                     view.offset(x: f.shift, y: -f.shift).opacity(f.opacity)
@@ -462,13 +654,13 @@ private struct SendButton: View {
                         CubicKeyframe(1, duration: 0.36)
                     }
                 }
-                .frame(width: 38, height: 38)
+                .frame(width: 48, height: 48)
                 .background(Circle().fill(enabled ? Theme.primary : Theme.muted))
                 .clipShape(Circle())
                 .animation(Motion.settle(), value: enabled)
         }
         .buttonStyle(PressStyle(scale: 0.9))
         .disabled(!enabled)
-        .accessibilityLabel("보내기")
+        .accessibilityLabel("메시지 보내기")
     }
 }
