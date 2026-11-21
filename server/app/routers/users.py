@@ -12,7 +12,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..models import AuthIdentity, PushDevice, RoomMember, User, UserStatus
 from ..redis_client import get_redis
-from ..schemas import ProfilePatchIn, UserOut
+from ..schemas import ProfilePatchIn, UserOut, valid_avatar
 from ..security import current_user
 from ..services import notify, social
 from ..services.text_filter import nickname_ok
@@ -23,7 +23,7 @@ MAX_UPLOAD = 8 * 1024 * 1024
 
 
 def to_out(user: User) -> UserOut:
-    return UserOut(id=user.id, nickname=user.nickname, avatar_url=user.avatar_url, status=user.status)
+    return UserOut(id=user.id, nickname=user.nickname, avatar_url=user.avatar_url, status=user.status, avatar=user.avatar)
 
 
 def _maybe_activate(user: User) -> None:
@@ -44,18 +44,25 @@ async def patch_me(
 ):
     if user.status == UserStatus.PENDING_PHONE:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "phone_required")
-    nick = body.nickname.strip()
-    if not (2 <= len(nick) <= 12):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "nickname_length")
-    if not nickname_ok(nick):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "nickname_banned")
-    taken = (
-        await session.execute(select(User.id).where(User.nickname == nick, User.id != user.id))
-    ).first()
-    if taken:
-        raise HTTPException(status.HTTP_409_CONFLICT, "nickname_taken")
-    user.nickname = nick
-    _maybe_activate(user)
+    if body.nickname is None and body.avatar is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "nothing_to_update")
+    if body.avatar is not None:
+        if not valid_avatar(body.avatar):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_avatar")
+        user.avatar = dict(body.avatar)
+    if body.nickname is not None:
+        nick = body.nickname.strip()
+        if not (2 <= len(nick) <= 12):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "nickname_length")
+        if not nickname_ok(nick):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "nickname_banned")
+        taken = (
+            await session.execute(select(User.id).where(User.nickname == nick, User.id != user.id))
+        ).first()
+        if taken:
+            raise HTTPException(status.HTTP_409_CONFLICT, "nickname_taken")
+        user.nickname = nick
+        _maybe_activate(user)
     await session.commit()
     return to_out(user)
 
@@ -110,6 +117,7 @@ async def delete_me(user: User = Depends(current_user), session: AsyncSession = 
     user.deleted_at = now
     user.nickname = None
     user.avatar_url = None
+    user.avatar = None
     user.phone_hmac = None
     await session.commit()
 

@@ -179,11 +179,17 @@ async def nearby(user: User = Depends(active_user), session: AsyncSession = Depe
     ids = await geo.nearby_user_ids(pos["lat"], pos["lng"], s.radius_m)
     hidden = await blocked_ids(session, user.id) | {user.id}
     ids = [i for i in ids if i not in hidden]
-    avatars: list[str | None] = []
+    users: list[User] = []
     if ids:
-        rows = (await session.execute(select(User).where(User.id.in_(ids[:20])))).scalars()
-        avatars = [u.avatar_url for u in rows][:8]
-    return NearbyOut(count=len(ids), avatars=avatars, radius_m=s.radius_m)
+        rows = {u.id: u for u in (await session.execute(select(User).where(User.id.in_(ids[:20])))).scalars()}
+        users = [rows[i] for i in ids[:20] if i in rows][:8]
+    return NearbyOut(
+        count=len(ids),
+        avatars=[u.avatar_url for u in users],
+        characters=[u.avatar for u in users],
+        radius_m=s.radius_m,
+        area_name=await geo.place_name(pos["lat"], pos["lng"]),
+    )
 
 
 # 둘이 동시에 '채팅하기'를 눌러 방이 두 개 생기지 않게 (서버는 replicas 1)

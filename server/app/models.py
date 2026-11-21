@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     Float,
     ForeignKey,
@@ -38,6 +39,8 @@ class User(Base):
     nickname: Mapped[str | None] = mapped_column(String(24), unique=True)
     avatar_url: Mapped[str | None] = mapped_column(String(512))
     phone_hmac: Mapped[str | None] = mapped_column(String(64), unique=True)
+    # 캐릭터 꾸미기 값 (iOS Avatar, snake_case 키). 없으면 앱이 id로 정한 기본 캐릭터
+    avatar: Mapped[dict | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(24), default=UserStatus.PENDING_PHONE)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -107,6 +110,8 @@ class TopicMember(Base):
     topic_id: Mapped[str] = mapped_column(ForeignKey("topics.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    # 이 토픽 알림 끄기 (나 기준)
+    muted: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
 
 class MessageType:
@@ -127,6 +132,9 @@ class Message(Base):
     type: Mapped[str] = mapped_column(String(16), default=MessageType.TEXT)
     body: Mapped[str] = mapped_column(Text, default="")
     meta: Mapped[dict | None] = mapped_column(JSON)
+    # 답장: 원본 메시지와, 원본이 지워져도 보이도록 그때의 요약 {id, sender_id, nickname, body}
+    reply_to_id: Mapped[int | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"))
+    reply_snapshot: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
 
 

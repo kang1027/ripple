@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_session
 from ..redis_client import get_redis
 from ..models import Message, Room, RoomMember, Topic, TopicMember, User
-from ..schemas import ChatsOut, MessageOut, RoomOut, TopicOut
+from ..schemas import ChatsOut, MessageOut, RoomOut, TopicOut, TopicPatchIn
 from ..security import active_user
 from ..services.chat import (
     active_membership,
@@ -103,9 +103,48 @@ async def _topic_for(session: AsyncSession, topic_id: str) -> Topic:
 
 @router.get("/topics/{topic_id}", response_model=TopicOut)
 async def get_topic(topic_id: str, user: User = Depends(active_user), session: AsyncSession = Depends(get_session)):
+    """토픽 멤버이거나, 지금 그 동네방에 있는 사람(카드에서 참여하기 전)만."""
     topic = await _topic_for(session, topic_id)
-    await _room_for_reader(session, topic.room_id, user)
+    if not await is_topic_member(session, topic_id, user.id):
+        await _room_for_reader(session, topic.room_id, user)
     return await topic_out(session, topic, user.id)
+
+
+async def _my_membership(session: AsyncSession, topic_id: str, user: User) -> TopicMember:
+    member = (
+        await session.execute(
+            select(TopicMember).where(TopicMember.topic_id == topic_id, TopicMember.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if member is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "not_a_member")
+    return member
+
+
+@router.patch("/topics/{topic_id}", response_model=TopicOut)
+async def patch_topic(
+    topic_id: str, body: TopicPatchIn, user: User = Depends(active_user), session: AsyncSession = Depends(get_session)
+):
+    """나 기준 토픽 설정. 지금은 알림 끄기만."""
+    topic = await _topic_for(session, topic_id)
+    member = await _my_membership(session, topic_id, user)
+    member.muted = body.muted
+    await session.commit()
+    return await topic_out(session, topic, user.id)
+
+
+@router.post("/topics/{topic_id}/leave")
+async def leave_topic(topic_id: str, user: User = Depends(active_user), session: AsyncSession = Depends(get_session)):
+    await _topic_for(session, topic_id)
+    member = (
+        await session.execute(
+            select(TopicMember).where(TopicMember.topic_id == topic_id, TopicMember.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if member is not None:
+        await session.delete(member)
+        await session.commit()
+    return {"ok": True}
 
 
 @router.post("/topics/{topic_id}/join", response_model=TopicOut)
@@ -134,7 +173,7 @@ async def topic_messages(
 
 
 # 메시지 보관 기간과 같게: 하루 지난 토픽은 목록에서 뺌
-CHAT_LIST_WINDOW = timedelta(hours=24)
+CHAT_LIST_WINDOW = timedelta(days=7)
 
 
 @router.get("/me/chats", response_model=ChatsOut)
@@ -155,9 +194,7 @@ async def my_chats(user: User = Depends(active_user), session: AsyncSession = De
         await session.execute(
             select(Topic)
             .join(TopicMember, TopicMember.topic_id == Topic.id)
-            .join(RoomMember, (RoomMember.room_id == Topic.room_id) & (RoomMember.user_id == user.id))
-            .where(TopicMember.user_id == user.id, Topic.last_message_at >= since, RoomMember.left_at.is_(None))
-            .distinct()
+            .where(TopicMember.user_id == user.id, Topic.last_message_at >= since)
             .order_by(Topic.last_message_at.desc())
             .limit(50)
         )

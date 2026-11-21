@@ -111,3 +111,40 @@ async def area_name(lat: float, lng: float) -> str:
     except Exception:
         pass
     return "이 근처"
+
+
+KAKAO_ADDRESS = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
+PLACE_CACHE_S = 30 * 60
+
+
+async def place_name(lat: float, lng: float) -> str | None:
+    """레이더에 보여 줄 지금 위치 이름. 건물 이름이 있으면 건물, 없으면 행정동 이름.
+    레이더가 2초마다 부르니 약 11m 격자로 30분 캐시한다. 키가 없거나 실패하면 None."""
+    key = get_settings().kakao_rest_api_key
+    if not key:
+        return None
+    r = get_redis()
+    cache_key = f"place:{round(lat, 4)}:{round(lng, 4)}"
+    cached = await r.get(cache_key)
+    if cached is not None:
+        return cached or None
+    name = ""
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            headers = {"Authorization": f"KakaoAK {key}"}
+            res = await client.get(KAKAO_ADDRESS, params={"x": lng, "y": lat}, headers=headers)
+            for d in res.json().get("documents", []):
+                building = ((d.get("road_address") or {}).get("building_name") or "").strip()
+                if building:
+                    name = building
+                    break
+            if not name:
+                res = await client.get(KAKAO_REGION, params={"x": lng, "y": lat}, headers=headers)
+                for d in res.json().get("documents", []):
+                    if d.get("region_type") == "H":
+                        name = d.get("region_3depth_name") or d.get("region_2depth_name") or ""
+                        break
+    except Exception:
+        return None
+    await r.set(cache_key, name, ex=PLACE_CACHE_S)
+    return name or None

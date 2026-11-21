@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     # 시연 중 레이더 문제 추적용. 위치 보고마다 결과·근처 인원·가장 가까운 사람 거리를 로그로 남김 (좌표는 안 남김)
     presence_log: bool = False
     room_idle_close_s: int = 30 * 60
-    message_retention_h: int = 24
+    message_retention_h: int = 24 * 7
 
     # 토픽
     topic_classifier: str = "rule"  # rule | claude | llm

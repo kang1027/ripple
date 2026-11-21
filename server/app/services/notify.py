@@ -121,13 +121,15 @@ async def _room_members(session: AsyncSession, room_id: str) -> set[str]:
     return set(rows.scalars())
 
 
-async def _topic_members(session: AsyncSession, topic_id: str) -> set[str]:
-    rows = await session.execute(
+async def _topic_members(session: AsyncSession, topic_id: str, *, include_muted: bool = True) -> set[str]:
+    q = (
         select(TopicMember.user_id)
         .join(User, User.id == TopicMember.user_id)
         .where(TopicMember.topic_id == topic_id, User.status == UserStatus.ACTIVE)
     )
-    return set(rows.scalars())
+    if not include_muted:
+        q = q.where(TopicMember.muted.is_(False))
+    return set((await session.execute(q)).scalars())
 
 
 async def _cooldown(key: str, seconds: int) -> bool:
@@ -167,7 +169,7 @@ async def _topic_text(session: AsyncSession, msg: dict) -> None:
     if topic is None:
         return
     sender_id, nickname = _sender(msg)
-    ids = await _exclude_sender(session, await _topic_members(session, topic.id), sender_id)
+    ids = await _exclude_sender(session, await _topic_members(session, topic.id, include_muted=False), sender_id)
     ids -= await _watching(topic_channel(topic.id), ids)
     await _push(
         session,

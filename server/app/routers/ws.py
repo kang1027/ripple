@@ -64,7 +64,10 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
     await notify.mark_online(channel, user.id)
 
     async def still_member() -> bool:
+        """동네방 소켓은 지금 그 방에 있어야 하고, 토픽 소켓은 토픽 멤버이기만 하면 된다 (장소를 떠나도 토픽은 유지)."""
         async with sessionmaker()() as session:
+            if topic_id:
+                return await is_topic_member(session, topic_id, user.id)
             return await active_membership(session, room_id, user.id) is not None
 
     async def pump() -> None:
@@ -84,7 +87,7 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
                 event = json.loads(data)
             except (TypeError, ValueError):
                 continue
-            if event.get("type") == "out_of_range" and event.get("user_id") == user.id:
+            if not topic_id and event.get("type") == "out_of_range" and event.get("user_id") == user.id:
                 await ws.send_text(data if isinstance(data, str) else data.decode())
                 await ws.close(code=4403)
                 return
@@ -106,11 +109,12 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
                 if not body:
                     continue
                 async with sessionmaker()() as session:
-                    if await active_membership(session, room_id, user.id) is None:
+                    if topic_id:
+                        if not await is_topic_member(session, topic_id, user.id):
+                            await ws.send_json({"type": "error", "code": "not_in_topic"})
+                            continue
+                    elif await active_membership(session, room_id, user.id) is None:
                         await ws.send_json({"type": "error", "code": "read_only"})
-                        continue
-                    if topic_id and not await is_topic_member(session, topic_id, user.id):
-                        await ws.send_json({"type": "error", "code": "not_in_topic"})
                         continue
                     member = await session.get(User, user.id)
                     await post_message(
@@ -120,6 +124,7 @@ async def _serve(ws: WebSocket, kind: str, target_id: str, token: str) -> None:
                         user=member,
                         body=body,
                         client_id=data.get("client_id"),
+                        reply_to=data.get("reply_to") if isinstance(data.get("reply_to"), int) else None,
                     )
     except WebSocketDisconnect:
         pass

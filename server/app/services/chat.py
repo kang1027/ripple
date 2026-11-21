@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Block, Message, MessageType, Room, RoomMember, Topic, TopicMember, User
 from ..redis_client import get_redis
-from ..schemas import MemberBrief, MessageOut, RoomOut, TopicOut
+from ..schemas import MemberBrief, MessageOut, ReplyRef, RoomOut, TopicOut
 from .categories import category_image_url
 from .text_filter import clean_message
 
@@ -82,7 +82,14 @@ async def topic_out(session: AsyncSession, topic: Topic, user_id: str | None = N
             select(func.count()).select_from(TopicMember).where(TopicMember.topic_id == topic.id)
         )
     ).scalar_one()
-    is_member = bool(user_id) and await is_topic_member(session, topic.id, user_id)
+    member = None
+    if user_id:
+        member = (
+            await session.execute(
+                select(TopicMember).where(TopicMember.topic_id == topic.id, TopicMember.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+    room = await session.get(Room, topic.room_id)
     return TopicOut(
         id=topic.id,
         room_id=topic.room_id,
@@ -92,7 +99,10 @@ async def topic_out(session: AsyncSession, topic: Topic, user_id: str | None = N
         image_url=topic.image_url or category_image_url(topic.category),
         member_count=count,
         last_message_at=topic.last_message_at,
-        is_member=is_member,
+        is_member=member is not None,
+        place_name=room.area_name if room else None,
+        created_at=topic.created_at,
+        muted=bool(member and member.muted),
     )
 
 
@@ -105,7 +115,8 @@ async def serialize(session: AsyncSession, messages: list[Message]) -> list[Mess
     out = []
     for m in messages:
         u = users.get(m.user_id) if m.user_id else None
-        sender = MemberBrief(id=u.id, nickname=u.nickname, avatar_url=u.avatar_url) if u else None
+        sender = MemberBrief(id=u.id, nickname=u.nickname, avatar_url=u.avatar_url, avatar=u.avatar) if u else None
+        reply = ReplyRef(**m.reply_snapshot) if m.reply_snapshot else None
         out.append(
             MessageOut(
                 id=m.id,
@@ -116,9 +127,26 @@ async def serialize(session: AsyncSession, messages: list[Message]) -> list[Mess
                 meta=m.meta,
                 sender=sender,
                 created_at=m.created_at,
+                reply=reply,
             )
         )
     return out
+
+
+async def reply_snapshot(session: AsyncSession, reply_to: int | None, room_id: str, topic_id: str | None) -> dict | None:
+    """같은 방·같은 토픽(동네방이면 topic_id 없음)의 메시지에만 답장할 수 있다. 아니면 None."""
+    if not reply_to:
+        return None
+    target = await session.get(Message, reply_to)
+    if target is None or target.room_id != room_id or target.topic_id != topic_id:
+        return None
+    sender = await session.get(User, target.user_id) if target.user_id else None
+    return {
+        "id": target.id,
+        "sender_id": target.user_id,
+        "nickname": sender.nickname if sender else None,
+        "body": target.body[:80],
+    }
 
 
 async def post_message(
@@ -131,8 +159,10 @@ async def post_message(
     type: str = MessageType.TEXT,
     meta: dict | None = None,
     client_id: str | None = None,
+    reply_to: int | None = None,
 ) -> MessageOut:
     text = clean_message(body) if type == MessageType.TEXT else body
+    snapshot = await reply_snapshot(session, reply_to, room_id, topic_id)
     msg = Message(
         room_id=room_id,
         topic_id=topic_id,
@@ -140,6 +170,8 @@ async def post_message(
         type=type,
         body=text,
         meta=meta,
+        reply_to_id=snapshot["id"] if snapshot else None,
+        reply_snapshot=snapshot,
     )
     session.add(msg)
     if topic_id:

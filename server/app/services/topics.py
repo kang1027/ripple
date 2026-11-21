@@ -247,11 +247,14 @@ def _meaningful(text: str) -> bool:
 # ---------- 처리 ----------
 
 
-async def _post_card(session: AsyncSession, topic: Topic, reminder: bool) -> None:
+async def _post_card(session: AsyncSession, topic: Topic, reminder: bool, reply_to: int | None = None) -> None:
+    """reply_to: 새 토픽이면 확정시킨 메시지(반응한 사람 말), 리마인드면 리마인드를 부른 메시지."""
     out = await topic_out(session, topic)
     meta = out.model_dump(mode="json") | {"topic_id": topic.id, "reminder": reminder}
     body = f"진행 중인 토픽: {topic.title}" if reminder else f"새 토픽: {topic.title}"
-    await post_message(session, room_id=topic.room_id, user=None, body=body, type=MessageType.TOPIC_CARD, meta=meta)
+    await post_message(
+        session, room_id=topic.room_id, user=None, body=body, type=MessageType.TOPIC_CARD, meta=meta, reply_to=reply_to
+    )
     if not reminder:
         await publish(room_channel(topic.room_id), {"type": "topic_created", "topic": out.model_dump(mode="json")})
 
@@ -306,7 +309,7 @@ async def process_job(session: AsyncSession, job: dict, classifier: TopicClassif
     for t in topics:
         if same_topic(t.title, result.title):
             if await r.set(f"topic_remind:{t.id}", "1", ex=s.topic_reminder_s, nx=True):
-                await _post_card(session, t, reminder=True)
+                await _post_card(session, t, reminder=True, reply_to=job.get("message_id"))
                 return JobOutcome("reminder", t.title)
             return JobOutcome("none", t.title)
 
@@ -333,7 +336,7 @@ async def process_job(session: AsyncSession, job: dict, classifier: TopicClassif
         await session.commit()
         # 확정 직후 이어지는 대화가 곧바로 리마인드 카드를 띄우지 않게 한다
         await r.set(f"topic_remind:{topic.id}", "1", ex=s.topic_reminder_s)
-        await _post_card(session, topic, reminder=False)
+        await _post_card(session, topic, reminder=False, reply_to=job.get("message_id"))
         notify.spawn(notify.on_topic_created(topic.id))
         return JobOutcome("confirmed", topic.title)
 

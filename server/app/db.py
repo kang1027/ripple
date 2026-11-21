@@ -37,6 +37,27 @@ async def create_all() -> None:
 
     async with engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)
+
+
+def _add_missing_columns(conn) -> None:
+    """마이그레이션 도구 없이 쓰는 동안, 모델에 새로 생긴 nullable/기본값 컬럼을 기존 테이블에 더한다.
+    컬럼을 지우거나 타입을 바꾸는 건 하지 않는다."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(conn)
+    for table in Base.metadata.sorted_tables:
+        if not insp.has_table(table.name):
+            continue
+        have = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in have:
+                continue
+            ddl = col.type.compile(dialect=conn.dialect)
+            default = ""
+            if col.server_default is not None:
+                default = f" DEFAULT {col.server_default.arg}"
+            conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}{default}'))
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

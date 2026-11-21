@@ -42,10 +42,36 @@ class UserOut(BaseModel):
     nickname: str | None
     avatar_url: str | None
     status: str
+    avatar: dict | None = None  # 캐릭터 꾸미기 값 (snake_case 키)
+
+
+# iOS DesignSystem/Avatar.swift의 Options와 같은 선택지
+AVATAR_OPTIONS: dict[str, tuple[str, ...]] = {
+    "hair": ("short", "bob", "curly", "bun", "none"),
+    "hair_color": ("ink", "cocoa", "gold", "blue", "rose"),
+    "skin": ("porcelain", "peach", "warm", "tan", "deep", "espresso"),
+    "eyewear": ("none", "snorkel", "sun", "round", "square"),
+    "eyes": ("dot", "oval", "happy", "sleepy"),
+    "nose": ("button", "round", "triangle"),
+    "mouth": ("smile", "grin", "small", "surprised"),
+    "body": ("round", "slim", "broad"),
+    "outfit": ("rashguard", "onepiece", "shorts"),
+    "clothes": ("blue", "mint", "lemon", "rose", "ink"),
+    "float": ("none", "ring", "flamingo", "dolphin"),
+    "float_color": (
+        "blue", "mint", "lemon", "rose", "coral", "lilac", "aqua", "tangerine", "cherry", "lime", "lavender", "ice",
+    ),
+    "prop": ("none", "cocktail", "juice", "watergun"),
+}
+
+
+def valid_avatar(value: dict) -> bool:
+    return set(value) == set(AVATAR_OPTIONS) and all(value[k] in opts for k, opts in AVATAR_OPTIONS.items())
 
 
 class ProfilePatchIn(BaseModel):
-    nickname: str
+    nickname: str | None = None
+    avatar: dict | None = None
 
 
 class PresenceIn(BaseModel):
@@ -71,12 +97,22 @@ class NearbyOut(BaseModel):
     count: int
     avatars: list[str | None]
     radius_m: int
+    characters: list[dict | None] = []  # avatars와 같은 순서의 캐릭터 값
+    area_name: str | None = None  # 지금 위치 이름. 건물 이름이 있으면 건물, 없으면 동네
 
 
 class MemberBrief(BaseModel):
     id: str
     nickname: str | None
     avatar_url: str | None
+    avatar: dict | None = None
+
+
+class ReplyRef(BaseModel):
+    id: int
+    sender_id: str | None
+    nickname: str | None
+    body: str  # 앞 80자
 
 
 class RoomOut(BaseModel):
@@ -98,6 +134,7 @@ class MessageOut(BaseModel):
     sender: MemberBrief | None
     created_at: datetime
     client_id: str | None = None
+    reply: ReplyRef | None = None
 
 
 class TopicOut(BaseModel):
@@ -110,6 +147,13 @@ class TopicOut(BaseModel):
     member_count: int
     last_message_at: datetime
     is_member: bool = False
+    place_name: str | None = None  # 토픽이 생긴 동네방 이름
+    created_at: datetime | None = None
+    muted: bool = False  # 나 기준 알림 끄기
+
+
+class TopicPatchIn(BaseModel):
+    muted: bool
 
 
 class ChatsOut(BaseModel):
