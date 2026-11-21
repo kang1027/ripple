@@ -1,0 +1,3 @@
+#include "Shared.xcconfig"
+// Debug.xcconfig 로 복사해서 써요. 로컬 서버 주소 (xcconfig에서 // 는 주석이라 URL은 /$()/ 로 씀)
+API_BASE_URL = http:/$()/localhost:8000

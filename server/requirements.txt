@@ -1,0 +1,13 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+aiosqlite>=0.20
+redis>=5.0
+httpx[socks,http2]>=0.27
+pyjwt[crypto]>=2.8
+pydantic-settings>=2.3
+pillow>=10.4
+python-multipart>=0.0.9
+fakeredis>=2.23
+anthropic>=2.12

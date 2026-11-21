@@ -1,0 +1,19 @@
+.DS_Store
+ios/Ripple.xcodeproj/
+ios/build/
+xcuserdata/
+.run/
+.permtest
+
+# 비밀값·운영 정보 (예시는 *.example)
+.env
+*.env
+*.p8
+.venv/
+node_modules/
+ios/Config/Shared.xcconfig
+ios/Config/Debug.xcconfig
+ios/Config/Release.xcconfig
+HANDOFF.md
+deploy-server.command
+run-simulator.command
