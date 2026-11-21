@@ -15,6 +15,7 @@ from ..services.chat import (
     ever_member,
     is_topic_member,
     publish,
+    push_demo_job,
     room_channel,
     room_out,
     serialize,
@@ -155,6 +156,7 @@ async def join_topic(topic_id: str, user: User = Depends(active_user), session: 
     if not await is_topic_member(session, topic_id, user.id):
         session.add(TopicMember(topic_id=topic_id, user_id=user.id))
         await session.commit()
+        await push_demo_job({"kind": "topic_join", "topic_id": topic_id, "user_id": user.id})
     return await topic_out(session, topic, user.id)
 
 

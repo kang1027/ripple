@@ -75,6 +75,8 @@ class Settings(BaseSettings):
 
     # 시연용 데모 봇. 0이면 꺼짐. 실제 사용자 주변에 봇을 띄우고 방에 같이 들어가 대화한다
     demo_bots: int = 0
+    # 녹화용 대본 모드. 봇이 미리 대화가 쌓인 방을 만들어 두고, 사용자 말에 정해진 순서로 답한다 (DEMO_BOTS와 같이 켬)
+    demo_script: bool = False
     topic_reminder_s: int = 600
     run_worker_inline: bool = True  # api 프로세스 안에서 워커 실행 (개발용)
 

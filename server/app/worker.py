@@ -17,7 +17,7 @@ from .db import create_all, sessionmaker
 from .models import Message, Room, RoomMember
 from .redis_client import get_redis
 from .services import demo, geo
-from .services.chat import TOPIC_JOBS, forget_replies_to
+from .services.chat import DEMO_JOBS, TOPIC_JOBS, forget_replies_to
 from .services.topics import process_job
 
 log = logging.getLogger("ripple.worker")
@@ -96,8 +96,11 @@ async def run(stop: asyncio.Event | None = None) -> None:
             log.exception("demo retire failed")
     while stop is None or not stop.is_set():
         try:
-            item = await r.blpop([TOPIC_JOBS], timeout=1)
-            if item:
+            item = await r.blpop([TOPIC_JOBS, DEMO_JOBS], timeout=1)
+            if item and item[0] == DEMO_JOBS:
+                if demo_on:
+                    demo.on_demo_job(json.loads(item[1]))
+            elif item:
                 job = json.loads(item[1])
                 async with sessionmaker()() as session:
                     outcome = await process_job(session, job)

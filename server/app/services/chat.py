@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..models import Block, Message, MessageType, Room, RoomMember, Topic, TopicMember, User
 from ..redis_client import get_redis
 from ..schemas import MemberBrief, MessageOut, ReplyRef, RoomOut, TopicOut
@@ -11,6 +12,8 @@ from .categories import category_cover_url, category_image_url
 from .text_filter import clean_message
 
 TOPIC_JOBS = "topic_jobs"
+# 데모 봇이 반응할 일 (토픽방 메시지·참여). DEMO_BOTS가 켜졌을 때만 쌓인다
+DEMO_JOBS = "demo_jobs"
 
 
 def room_channel(room_id: str) -> str:
@@ -166,7 +169,9 @@ async def post_message(
     meta: dict | None = None,
     client_id: str | None = None,
     reply_to: int | None = None,
+    classify: bool = True,
 ) -> MessageOut:
+    """classify=False면 토픽 분류 job을 만들지 않는다 (데모 봇의 대본 대사가 토픽을 만들지 않게)."""
     text = clean_message(body) if type == MessageType.TEXT else body
     snapshot = await reply_snapshot(session, reply_to, room_id, topic_id)
     msg = Message(
@@ -195,12 +200,19 @@ async def post_message(
 
     notify.spawn(notify.on_message(out.model_dump(mode="json")))
 
-    if type == MessageType.TEXT and topic_id is None and user is not None:
+    if classify and type == MessageType.TEXT and topic_id is None and user is not None:
         await get_redis().rpush(
             TOPIC_JOBS,
             json.dumps({"room_id": room_id, "message_id": msg.id, "user_id": user.id, "body": text}),
         )
+    if type == MessageType.TEXT and topic_id is not None and user is not None:
+        await push_demo_job({"kind": "topic_message", "topic_id": topic_id, "user_id": user.id, "body": text})
     return out
+
+
+async def push_demo_job(job: dict) -> None:
+    if get_settings().demo_bots > 0:
+        await get_redis().rpush(DEMO_JOBS, json.dumps(job, ensure_ascii=False))
 
 
 async def forget_replies_to(session: AsyncSession, where) -> None:
