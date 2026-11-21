@@ -148,6 +148,7 @@ class TopicOut(BaseModel):
     last_message_at: datetime
     is_member: bool = False
     place_name: str | None = None  # 토픽이 생긴 동네방 이름
+    cover_url: str | None = None  # 아이콘 없는 카테고리 원본 사진 (큰 커버용)
     created_at: datetime | None = None
     muted: bool = False  # 나 기준 알림 끄기
 

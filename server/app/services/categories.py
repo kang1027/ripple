@@ -25,3 +25,10 @@ CATEGORY_LABEL = {k: v[0] for k, v in CATEGORIES.items()}
 def category_image_url(category: str) -> str:
     key = category if category in CATEGORIES else "etc"
     return f"{get_settings().public_base_url}/static/topics/{key}.jpg"
+
+
+def category_cover_url(category: str) -> str:
+    """아이콘 없는 원본 사진(2:1, 1440×720). 토픽방 큰 커버·스토리 카드용.
+    원본은 tools/topic-images/photos/ (CC0, CREDITS.md)에서 그대로 복사한다."""
+    key = category if category in CATEGORIES else "etc"
+    return f"{get_settings().public_base_url}/static/topics/bg/{key}.jpg"

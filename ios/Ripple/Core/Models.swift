@@ -72,6 +72,8 @@ struct TopicOut: Decodable, Hashable, Identifiable {
     var isMember: Bool
     /// 토픽이 생긴 동네방 이름
     let placeName: String?
+    /// 아이콘 없는 카테고리 원본 사진 (토픽방 큰 커버·스토리 카드용)
+    let coverUrl: String?
     let createdAt: Date?
     /// 나 기준 알림 끄기 (옛 서버면 nil)
     var muted: Bool?
@@ -90,6 +92,8 @@ struct TopicMeta: Decodable, Hashable {
     let summary: String
     let category: String
     let imageUrl: String?
+    /// 아이콘 없는 카테고리 원본 사진 (옛 서버면 nil)
+    let coverUrl: String?
     let memberCount: Int
     let reminder: Bool?
 }

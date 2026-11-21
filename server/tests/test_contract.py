@@ -87,6 +87,8 @@ def test_topic_survives_leaving_room_and_mute_leave(client, monkeypatch, sent_pu
     topics = client.get("/me/chats", headers=auth(a)).json()["topics"]
     topic = topics[0]
     assert topic["place_name"] and topic["created_at"] and topic["muted"] is False
+    assert topic["cover_url"].endswith(f"/static/topics/bg/{topic['category']}.jpg")
+    assert client.get(f"/static/topics/bg/{topic['category']}.jpg").status_code == 200
 
     # a가 동네방 범위를 벗어나 빠져도 토픽은 목록에 남고, 토픽방에서 계속 말할 수 있다
     m = 1 / 111_320

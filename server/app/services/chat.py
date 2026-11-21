@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import Block, Message, MessageType, Room, RoomMember, Topic, TopicMember, User
 from ..redis_client import get_redis
 from ..schemas import MemberBrief, MessageOut, ReplyRef, RoomOut, TopicOut
-from .categories import category_image_url
+from .categories import category_cover_url, category_image_url
 from .text_filter import clean_message
 
 TOPIC_JOBS = "topic_jobs"
@@ -97,6 +97,7 @@ async def topic_out(session: AsyncSession, topic: Topic, user_id: str | None = N
         summary=topic.summary,
         category=topic.category,
         image_url=topic.image_url or category_image_url(topic.category),
+        cover_url=category_cover_url(topic.category),
         member_count=count,
         last_message_at=topic.last_message_at,
         is_member=member is not None,

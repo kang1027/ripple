@@ -9,7 +9,7 @@ node gen.mjs ../../app/static/topics
 ```
 
 - 배경 사진은 Openverse에서 찾은 CC0 사진이에요. 출처는 `photos/CREDITS.md`에 있어요.
-- 사진을 바꿀 땐 2:1(1440×720) JPG로 잘라서 `photos/`에 넣어요. 가운데 원이 사진 한가운데를 가리니까, 주인공이 한쪽에 있는 사진이 좋아요.
+- 사진을 바꿀 땐 2:1(1440×720) JPG로 잘라서 `photos/`에 넣어요. 아이콘 없는 원본은 큰 커버용으로 `app/static/topics/bg/`에도 그대로 복사해요 (`cp photos/*.jpg ../../app/static/topics/bg/`). 가운데 원이 사진 한가운데를 가리니까, 주인공이 한쪽에 있는 사진이 좋아요.
 - `node_modules`는 `deploy-server.command`의 rsync로 홈서버에 같이 넘어가지 않게 다 쓰면 지워요.
 - 예전 `.png` 이미지는 그 전에 만들어진 토픽 카드가 아직 가리키고 있어서 남겨 뒀어요.
 
