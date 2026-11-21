@@ -94,7 +94,8 @@ final class AppState {
     /// 앱을 쓰는 동안 2초마다 위치를 보낸다. 방을 벗어나 빠지면 그 방 화면을 닫고 레이더로 돌아간다
     func presenceLoop() async {
         let location = LocationService.shared
-        location.start()
+        // 권한을 아직 안 물었으면 여기서 묻지 않는다. 위치 안내 화면에서 '허용하기'를 누를 때 묻는다
+        location.startIfAuthorized()
         while !Task.isCancelled {
             // 오래된 위치를 보내면 멀어졌던 자리에 계속 있는 걸로 보여서 다시 붙어도 못 찾는다
             if !location.isBackground, let loc = location.freshLocation() {

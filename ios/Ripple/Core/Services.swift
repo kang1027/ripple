@@ -37,6 +37,12 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
 
     func stop() { manager.stopUpdatingLocation() }
 
+    /// 이미 허용된 경우에만 위치를 받기 시작한다. 권한을 묻지 않는다 (묻는 건 위치 안내 화면에서 start())
+    func startIfAuthorized() {
+        authorization = manager.authorizationStatus
+        if isAuthorized { manager.startUpdatingLocation() }
+    }
+
     /// 앱이 내려갈 때. 로그인돼 있으면 위치를 계속 받아 근처 사람 알림에 쓴다
     func enterBackground() {
         isBackground = true
