@@ -308,6 +308,26 @@ struct RadarView: View {
 
 // MARK: - 수영장 그림
 
+/// 튜브 탄 캐릭터 그림 (그림자 포함). 같은 꾸미기면 한 번만 그린다
+@MainActor
+private enum SwimmerImageCache {
+    static let box = CGSize(width: 32 + 24, height: 50 + 34)
+    private static var cache: [Avatar: UIImage] = [:]
+
+    static func image(for avatar: Avatar) -> UIImage? {
+        if let hit = cache[avatar] { return hit }
+        let content = PoolCharacterView(avatar: avatar)
+            .shadow(color: Color(hex: 0x1B3E5C, alpha: 0.18), radius: 2.5, y: 9)
+            .frame(width: box.width, height: box.height)
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 3
+        guard let img = renderer.uiImage else { return nil }
+        if cache.count > 40 { cache.removeAll() }
+        cache[avatar] = img
+        return img
+    }
+}
+
 /// 물(셰이더) + 캐릭터. 좌표는 화면 전체 기준
 private struct PoolStage: View {
     let frame: PoolFrameSnapshot
@@ -338,12 +358,19 @@ private struct SwimmerView: View {
         let lift: CGFloat = swimmer.held ? -14 : (landing.map { -14 * (1 - $0) + 3 * sin(.pi * $0) } ?? 0)
         let scale: CGFloat = swimmer.held ? 1.16 : (landing.map { 1.16 - 0.16 * $0 - 0.1 * sin(.pi * $0) } ?? 1)
         ZStack {
-            PoolCharacterView(avatar: swimmer.avatar, time: swimmer.held ? time * 10 : time)
-                .rotationEffect(.degrees(wiggle))
-                .scaleEffect(scale)
-                .offset(y: lift)
-                .shadow(color: Color(hex: 0x1B3E5C, alpha: swimmer.held ? 0.12 : 0.18), radius: swimmer.held ? 6 : 2.5, y: swimmer.held ? 4 : 9)
-                .rotationEffect(.degrees(swimmer.rotation))
+            Group {
+                if swimmer.avatar.isFloating, !swimmer.held, let baked = SwimmerImageCache.image(for: swimmer.avatar) {
+                    // 팔다리가 움직이지 않으니 그림자까지 한 장으로 구운 걸 쓴다
+                    Image(uiImage: baked).resizable().frame(width: SwimmerImageCache.box.width, height: SwimmerImageCache.box.height)
+                } else {
+                    PoolCharacterView(avatar: swimmer.avatar, time: swimmer.held ? time * 10 : time)
+                        .shadow(color: Color(hex: 0x1B3E5C, alpha: swimmer.held ? 0.12 : 0.18), radius: swimmer.held ? 6 : 2.5, y: swimmer.held ? 4 : 9)
+                }
+            }
+            .rotationEffect(.degrees(wiggle))
+            .scaleEffect(scale)
+            .offset(y: lift)
+            .rotationEffect(.degrees(swimmer.rotation))
             if swimmer.isMe {
                 Text("나")
                     .font(.system(size: 9, weight: .bold))
@@ -356,7 +383,8 @@ private struct SwimmerView: View {
     }
 }
 
-/// 수영장 바닥(타일 + 인원수)을 그리고 셰이더로 물을 얹는다
+/// 수영장 바닥(타일 + 인원수)을 그리고 셰이더로 물을 얹는다.
+/// 물결은 부드러워서 절반 해상도로 계산한 뒤 키운다 (픽셀 수 1/4, 프레임은 그대로)
 private struct PoolWater: View {
     let time: Double
     let swimmers: [Float]
@@ -365,8 +393,69 @@ private struct PoolWater: View {
     let floorCenterY: CGFloat
     let scheme: ColorScheme
 
+    private static let downscale: CGFloat = 2
+
     var body: some View {
         let raw = Theme.Water.raw(scheme)
+        GeometryReader { geo in
+            let full = geo.size
+            let small = CGSize(width: full.width / Self.downscale, height: full.height / Self.downscale)
+            Group {
+                if let floor = PoolFloorCache.image(count: count, size: full, centerY: floorCenterY) {
+                    Image(uiImage: floor).resizable()
+                } else {
+                    Theme.Water.floor
+                }
+            }
+            .frame(width: small.width, height: small.height)
+            .layerEffect(
+                ShaderLibrary.poolWater(
+                    .boundingRect,
+                    .float(Float(time)),
+                    .floatArray(swimmers),
+                    .floatArray(touches),
+                    .float3(Self.rgb(raw.deep)),
+                    .float3(Self.rgb(raw.shallow)),
+                    .float3(Self.rgb(raw.highlight))
+                ),
+                maxSampleOffset: CGSize(width: 14, height: 14)
+            )
+            .scaleEffect(Self.downscale, anchor: .topLeading)
+            .frame(width: full.width, height: full.height, alignment: .topLeading)
+        }
+        .accessibilityElement()
+        .accessibilityLabel("\(count)명이 새겨진 수영장 바닥 위로 일렁이는 물결")
+    }
+
+    static func rgb(_ hex: UInt32) -> (Float, Float, Float) {
+        (Float((hex >> 16) & 0xFF) / 255, Float((hex >> 8) & 0xFF) / 255, Float(hex & 0xFF) / 255)
+    }
+}
+
+/// 바닥 그림은 인원수·크기가 바뀔 때만 다시 그린다
+@MainActor
+private enum PoolFloorCache {
+    private static var key: String?
+    private static var cached: UIImage?
+
+    static func image(count: Int, size: CGSize, centerY: CGFloat) -> UIImage? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let k = "\(count)|\(Int(size.width))x\(Int(size.height))|\(Int(centerY))"
+        if k == key, let cached { return cached }
+        let renderer = ImageRenderer(content: PoolFloor(count: count, centerY: centerY).frame(width: size.width, height: size.height))
+        renderer.scale = 1.5
+        guard let img = renderer.uiImage else { return nil }
+        key = k
+        cached = img
+        return img
+    }
+}
+
+private struct PoolFloor: View {
+    let count: Int
+    let centerY: CGFloat
+
+    var body: some View {
         Canvas { ctx, size in
             ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(Theme.Water.floor))
             var grid = Path()
@@ -377,30 +466,13 @@ private struct PoolWater: View {
             while y < size.height { grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y)); y += tile }
             ctx.stroke(grid, with: .color(Theme.Water.grout), lineWidth: 0.75)
 
-            let center = floorCenterY > 0 ? floorCenterY : size.height * 0.53
+            let center = centerY > 0 ? centerY : size.height * 0.53
             let number = ctx.resolve(Text("\(count)").font(AppFont.size(90.7, .heavy)).foregroundStyle(Theme.Water.lettering))
             ctx.draw(number, at: CGPoint(x: size.width / 2, y: center - 7.6), anchor: .center)
             let label = ctx.resolve(Text("지금 이곳의 ripplers").font(AppFont.size(12.1, .semibold)).foregroundStyle(Theme.Water.lettering))
             ctx.draw(label, at: CGPoint(x: size.width / 2, y: center + 52.9), anchor: .center)
         }
-        .layerEffect(
-            ShaderLibrary.poolWater(
-                .boundingRect,
-                .float(Float(time)),
-                .floatArray(swimmers),
-                .floatArray(touches),
-                .float3(Self.rgb(raw.deep)),
-                .float3(Self.rgb(raw.shallow)),
-                .float3(Self.rgb(raw.highlight))
-            ),
-            maxSampleOffset: CGSize(width: 28, height: 28)
-        )
-        .accessibilityElement()
-        .accessibilityLabel("\(count)명이 새겨진 수영장 바닥 위로 일렁이는 물결")
-    }
-
-    static func rgb(_ hex: UInt32) -> (Float, Float, Float) {
-        (Float((hex >> 16) & 0xFF) / 255, Float((hex >> 8) & 0xFF) / 255, Float(hex & 0xFF) / 255)
+        .environment(\.colorScheme, .light)
     }
 }
 
