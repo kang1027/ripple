@@ -2,64 +2,198 @@ import KakaoSDKAuth
 import KakaoSDKUser
 import SwiftUI
 
-/// 마이 탭: 프로필, 차단 목록, 로그아웃, 회원 탈퇴
+/// 내 정보 탭: 캐릭터·닉네임, 화면과 대화, 차단 목록, 문의, 계정
 struct SettingsView: View {
     @Environment(AppState.self) private var app
     @State private var blocks: [MemberBrief] = []
     @State private var confirmSignOut = false
+    @State private var editingCharacter = false
+    @State private var editingNickname = false
+    @State private var copied = false
+
+    private var avatar: Avatar { app.me?.avatar ?? AvatarStore.load() }
 
     var body: some View {
-        List {
-            Section {
-                NavigationLink {
-                    ProfileSetupView(isEditing: true)
-                        .navigationTitle("프로필 수정")
-                        .navigationBarTitleDisplayMode(.inline)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                profile.padding(.top, 16)
+                Button {
+                    Haptics.tap()
+                    editingCharacter = true
                 } label: {
-                    HStack(spacing: 14) {
-                        ShadAvatar(url: app.me?.avatarUrl, size: 52)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(app.me?.nickname ?? "")
-                                .font(.system(size: 17, weight: .semibold))
-                            Text("프로필 수정")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.mutedForeground)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-
-            Section("차단 목록") {
-                if blocks.isEmpty {
-                    Text("차단한 사람이 없어요").foregroundStyle(Theme.mutedForeground)
-                }
-                ForEach(blocks, id: \.id) { b in
-                    HStack {
-                        ShadAvatar(url: b.avatarUrl, size: 28)
-                        Text(b.nickname ?? "알 수 없음")
+                    HStack(spacing: 8) {
+                        Image(systemName: "person").font(.system(size: 14, weight: .medium))
+                        Text("캐릭터 꾸미기").appFont(14, .semibold)
                         Spacer()
-                        Button("해제") { Task { await unblock(b.id) } }
-                            .font(.footnote)
-                            .buttonStyle(.borderless)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 16)
+                    .frame(height: 44)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.xl).fill(Theme.secondary))
+                }
+                .buttonStyle(PressStyle(scale: 0.98))
+                .padding(.top, 16)
+
+                AppearanceControls().padding(.top, 24)
+
+                section("차단한 사용자 \(blocks.count)") {
+                    if blocks.isEmpty {
+                        VStack(spacing: 0) {
+                            Text("🕊️")
+                                .font(.system(size: 32))
+                                .frame(width: 64, height: 64)
+                                .background(Circle().fill(Theme.primarySoft))
+                            Text("여긴 평화로운 구역").appFont(14, .bold).foregroundStyle(Theme.foreground).padding(.top, 8)
+                            Text("차단한 사람이 없어요. 이대로 쭉!").appFont(12).foregroundStyle(Theme.mutedForeground).padding(.top, 4)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    }
+                    ForEach(Array(blocks.enumerated()), id: \.element.id) { i, b in
+                        if i > 0 { divider }
+                        HStack {
+                            Text(b.nickname ?? "알 수 없음").appFont(14, .semibold).foregroundStyle(Theme.foreground)
+                            Spacer()
+                            Button { Task { await unblock(b.id) } } label: {
+                                Text("차단 해제")
+                                    .appFont(12, .bold)
+                                    .foregroundStyle(Theme.foreground)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Theme.secondary))
+                            }
+                            .buttonStyle(PressStyle())
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .transition(.opacity)
                     }
                 }
-            }
 
-            Section("계정") {
-                Button("로그아웃") { confirmSignOut = true }
-                    .foregroundStyle(Theme.foreground)
-                NavigationLink {
-                    WithdrawView()
-                } label: {
-                    Text("회원 탈퇴").foregroundStyle(Theme.mutedForeground)
+                section("문의") {
+                    Button {
+                        UIPasteboard.general.string = "help@ripple.app"
+                        Haptics.success()
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+                        if let url = URL(string: "mailto:help@ripple.app") { UIApplication.shared.open(url) }
+                    } label: {
+                        HStack {
+                            Text("help@ripple.app").appFont(14, .semibold).foregroundStyle(Theme.foreground)
+                            Spacer()
+                            Text(copied ? "복사했어요" : "")
+                                .appFont(12)
+                                .foregroundStyle(Theme.mutedForeground)
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.mutedForeground)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.99, dim: 0.6))
+                }
+
+                section("계정") {
+                    Button { confirmSignOut = true } label: {
+                        HStack {
+                            Text("로그아웃").appFont(14, .semibold).foregroundStyle(Theme.foreground)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.99, dim: 0.6))
+                    divider
+                    NavigationLink {
+                        WithdrawView()
+                    } label: {
+                        HStack {
+                            Text("회원 탈퇴").appFont(14, .semibold).foregroundStyle(Theme.mutedForeground)
+                            Spacer()
+                            Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.mutedForeground)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle(scale: 0.99, dim: 0.6))
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 32)
         }
+        .animation(Motion.settle(), value: blocks.map(\.id))
         .task { blocks = (try? await app.api.request("GET", "/blocks")) ?? [] }
         .alert("로그아웃할까요?", isPresented: $confirmSignOut) {
             Button("취소", role: .cancel) {}
             Button("로그아웃", role: .destructive) { app.signOut() }
+        }
+        .sheet(isPresented: $editingCharacter) {
+            CharacterEditorSheet(initial: avatar) { next in await saveAvatar(next) }
+        }
+        .sheet(isPresented: $editingNickname) {
+            NicknameEditorSheet(nickname: app.me?.nickname ?? "") { next in await saveNickname(next) }
+        }
+    }
+
+    private var profile: some View {
+        HStack(spacing: 16) {
+            Button {
+                Haptics.tap()
+                editingCharacter = true
+            } label: {
+                CharacterView(avatar: avatar)
+                    .frame(width: 72, height: 79)
+                    .offset(y: 6)
+                    .frame(width: 80, height: 80)
+                    .background(Circle().fill(Theme.primarySoft))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(PressStyle(scale: 0.95))
+            .accessibilityLabel("내 캐릭터 꾸미기")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("닉네임").appFont(12).foregroundStyle(Theme.mutedForeground)
+                Text(app.me?.nickname ?? "").appFont(20, .heavy).foregroundStyle(Theme.foreground)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            CircleIconButton(systemName: "pencil", label: "닉네임 변경") { editingNickname = true }
+        }
+    }
+
+    private var divider: some View {
+        Rectangle().fill(Theme.border).frame(height: 1)
+    }
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).appFont(12, .bold).foregroundStyle(Theme.mutedForeground).padding(.horizontal, 4)
+            VStack(spacing: 0) { content() }
+        }
+        .padding(.top, 28)
+    }
+
+    private func saveAvatar(_ next: Avatar) async -> String? {
+        struct Body: Encodable { let avatar: Avatar }
+        AvatarStore.save(next)
+        do {
+            let me: UserOut = try await app.api.request("PATCH", "/me", body: Body(avatar: next))
+            app.me = me
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private func saveNickname(_ next: String) async -> String? {
+        struct Body: Encodable { let nickname: String }
+        do {
+            let me: UserOut = try await app.api.request("PATCH", "/me", body: Body(nickname: next))
+            app.me = me
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 

@@ -35,15 +35,15 @@ struct LoginView: View {
         VStack(spacing: 0) {
             Spacer(minLength: 24)
             VStack(spacing: 18) {
-                RippleHero(markSize: 92, spread: 250)
-                    .frame(height: 170)
+                RippleHero(markSize: 80, spread: 240)
+                    .frame(height: 200)
                 VStack(spacing: 8) {
-                    Text("같은 공간 채팅")
-                        .font(.system(size: 28, weight: .bold))
+                    Text("Ripple")
+                        .appFont(32, .black)
                         .foregroundStyle(Theme.foreground)
                         .riseIn(0.15)
                     Text("지금 여기, 같은 경험")
-                        .font(.system(size: 16))
+                        .appFont(15)
                         .foregroundStyle(Theme.mutedForeground)
                         .riseIn(0.22)
                 }
@@ -82,7 +82,7 @@ struct LoginView: View {
                     KakaoSymbol().fill(Theme.kakaoLabel).frame(width: 21, height: 20)
                 }
                 Text("카카오로 시작하기")
-                    .font(.system(size: 18, weight: .medium))
+                    .appFont(17, .bold)
             }
             .foregroundStyle(Theme.kakaoLabel)
             .frame(maxWidth: .infinity)

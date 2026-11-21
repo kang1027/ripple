@@ -301,6 +301,8 @@ struct ProfileSetupView: View {
     @State private var shakes = 0
     @FocusState private var nicknameFocused: Bool
     @State private var scrollTarget: String?
+    @State private var avatar = AvatarStore.load()
+    @State private var editingCharacter = false
     var isEditing = false
 
     private let maxLength = 12
@@ -321,13 +323,13 @@ struct ProfileSetupView: View {
                 if !isEditing {
                     VStack(alignment: .leading, spacing: 8) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("프로필을")
-                            Text("만들어 주세요")
+                            Text("여기서 쓸 이름과")
+                            Text("캐릭터를 정해요")
                         }
-                        .font(.system(size: 26, weight: .bold))
+                        .appFont(28, .heavy)
                         .foregroundStyle(Theme.foreground)
-                        Text("주변 사람들에게 보이는 이름과 사진이에요")
-                            .font(.system(size: 15))
+                        Text("주변 사람들에게 보이는 모습이에요")
+                            .appFont(14)
                             .foregroundStyle(Theme.mutedForeground)
                     }
                     .riseIn(0.05)
@@ -338,7 +340,16 @@ struct ProfileSetupView: View {
                     .riseIn(0.12)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("닉네임").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.mutedForeground)
+                    HStack {
+                        Text("닉네임").appFont(12, .semibold).foregroundStyle(Theme.mutedForeground)
+                        Spacer()
+                        Button {
+                            Haptics.select()
+                            nickname = String(NicknameRule.random(excluding: nickname).prefix(maxLength))
+                        } label: {
+                            Label("랜덤", systemImage: "shuffle").appFont(12, .semibold).foregroundStyle(Theme.primary)
+                        }
+                    }
                     TextField("2~12자", text: $nickname)
                         .focused($nicknameFocused)
                         .textInputAutocapitalization(.never)
@@ -394,6 +405,37 @@ struct ProfileSetupView: View {
     }
 
     private var avatarPicker: some View {
+        Button {
+            Haptics.tap()
+            editingCharacter = true
+        } label: {
+            VStack(spacing: 12) {
+                CharacterView(avatar: avatar)
+                    .frame(width: 132, height: 145)
+                    .offset(y: 12)
+                    .frame(width: 160, height: 160)
+                    .background(Circle().fill(Theme.primarySoft))
+                    .clipShape(Circle())
+                Text("캐릭터 꾸미기")
+                    .appFont(12, .bold)
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Theme.secondary))
+            }
+        }
+        .buttonStyle(PressStyle(scale: 0.96))
+        .accessibilityLabel("캐릭터 꾸미기")
+        .sheet(isPresented: $editingCharacter) {
+            CharacterEditorSheet(initial: avatar, saveTitle: "이 모습으로 정하기") { next in
+                avatar = next
+                AvatarStore.save(next)
+                return nil
+            }
+        }
+    }
+
+    private var photoPicker: some View {
         PhotosPicker(selection: $pickerItem, matching: .images) {
             ZStack {
                 if let image {
@@ -440,7 +482,9 @@ struct ProfileSetupView: View {
             if let image, let jpeg = image.jpegData(compressionQuality: 0.8) {
                 let _: UserOut = try await app.api.uploadImage("/me/avatar", jpeg: jpeg)
             }
-            let _: UserOut = try await app.api.request("PATCH", "/me", body: ["nickname": trimmed])
+            struct Body: Encodable { let nickname: String; let avatar: Avatar }
+            AvatarStore.save(avatar)
+            let _: UserOut = try await app.api.request("PATCH", "/me", body: Body(nickname: trimmed, avatar: avatar))
             Haptics.success()
             await app.refreshMe()
         } catch {

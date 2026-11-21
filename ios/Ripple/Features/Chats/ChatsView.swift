@@ -1,139 +1,213 @@
 import SwiftUI
 
-/// 채팅 탭: 지금 들어가 있는 방 + 참여한 토픽
+/// 내가 참여한 방 탭: 장소를 떠나도 이어지는 토픽방 목록.
+/// 왼쪽으로 밀면 나가기, 오른쪽으로 밀면 알림 끄기 (한 번에 한 줄만 열림)
 struct ChatsView: View {
     @Environment(AppState.self) private var app
     @State private var chats: ChatsOut?
     @State private var error: String?
+    @State private var place = ChatsView.allPlaces
+    @State private var manage: TopicOut?
+    @State private var leaving: TopicOut?
+
+    static let allPlaces = "전체 장소"
+
+    private var topics: [TopicOut] { chats?.topics ?? [] }
+    private var places: [String] {
+        var seen: [String] = []
+        for t in topics { if let p = t.placeName, !p.isEmpty, !seen.contains(p) { seen.append(p) } }
+        return seen
+    }
+    private var visible: [TopicOut] {
+        place == Self.allPlaces ? topics : topics.filter { $0.placeName == place }
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                section("지금 있는 방") {
-                    if let room = chats?.room {
-                        roomRow(room)
-                    } else if chats != nil {
-                        emptyRoom
-                    }
+        List {
+            Group {
+                PageTitle(title: "내가 참여한 방")
+                HStack(spacing: 12) {
+                    Text("장소는 달라도, 이야기는 계속")
+                        .appFont(12)
+                        .foregroundStyle(Theme.mutedForeground)
+                    Spacer()
+                    if !places.isEmpty { placePicker }
                 }
-                .riseIn(0.02)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
 
-                section("참여한 토픽") {
-                    if let topics = chats?.topics, !topics.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(Array(topics.enumerated()), id: \.element.id) { i, topic in
-                                if i > 0 { Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 68) }
-                                topicRow(topic)
+            ForEach(visible) { topic in
+                Button {
+                    Haptics.tap()
+                    app.path.append(.topic(topic))
+                } label: {
+                    TopicRoomRow(topic: topic, place: nil)
+                        .overlay(alignment: .trailing) {
+                            Button { manage = topic } label: {
+                                Image(systemName: "ellipsis")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Theme.mutedForeground)
+                                    .frame(width: 32, height: 32)
+                                    .contentShape(Rectangle())
                             }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 8)
+                            .accessibilityLabel("\(TopicTitle.hashtag(topic.title)) 방 관리")
                         }
-                        .background(Theme.background)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: 1))
-                    } else if chats != nil {
-                        Text("대화에서 같은 이야기가 나오면 토픽 봇이 토픽방을 만들어 줘요")
-                            .font(.subheadline)
-                            .foregroundStyle(Theme.mutedForeground)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(16)
-                            .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.muted))
-                    }
                 }
-                .riseIn(0.08)
-
-                if let error {
-                    Text(error).font(.footnote).foregroundStyle(Theme.destructive)
+                .buttonStyle(PressStyle(scale: 0.98))
+                .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button { leaving = topic } label: { Label("나가기", systemImage: "rectangle.portrait.and.arrow.right") }
+                        .tint(Theme.destructive)
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button { Task { await toggleMute(topic) } } label: {
+                        Label(topic.muted == true ? "알림 켜기" : "알림 끄기", systemImage: topic.muted == true ? "bell" : "bell.slash")
+                    }
+                    .tint(Theme.primary)
                 }
             }
-            .padding(20)
+
+            if chats != nil && visible.isEmpty {
+                EmptyState(
+                    title: "아직 남겨둔 이야기가 없어요",
+                    message: "가까운 방에서 첫 이야기를 시작해 볼까요?",
+                    action: ("주변 방 보기", { app.tab = .nearby })
+                )
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
+            if let error {
+                Text(error).appFont(12).foregroundStyle(Theme.destructive)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .overlay { if chats == nil && error == nil { ProgressView() } }
         .refreshable { await load() }
+        // 방에서 빠지거나 자동 재입장할 때 AppState가 chatsRevision을 올린다
         .task(id: app.chatsRevision) { await load() }
-        .animation(Motion.settle(), value: chats?.room?.id)
+        .animation(Motion.settle(), value: visible.map(\.id))
+        .sheet(item: $manage) { topic in manageSheet(topic) }
+        .sheet(item: $leaving) { topic in leaveSheet(topic) }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.mutedForeground)
-            content()
-        }
-    }
-
-    private func roomRow(_ room: RoomOut) -> some View {
-        Button {
-            Haptics.tap()
-            app.path.append(.room(room))
+    private var placePicker: some View {
+        Menu {
+            Picker("참여한 장소", selection: $place) {
+                Text(Self.allPlaces).tag(Self.allPlaces)
+                ForEach(places, id: \.self) { Text($0).tag($0) }
+            }
         } label: {
-            HStack(spacing: 14) {
-                RippleMark(size: 40)
-                    .padding(6)
-                    .background(Circle().fill(Theme.muted))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(room.areaName.isEmpty ? "이 근처 채팅방" : room.areaName)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.foreground)
-                    HStack(spacing: 6) {
-                        ShadAvatarStack(urls: room.avatars, size: 18)
-                        Text("\(room.memberCount)명 참여 중")
-                            .font(.footnote)
-                            .foregroundStyle(Theme.mutedForeground)
-                    }
+            HStack(spacing: 6) {
+                Text(place).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .appFont(12, .semibold)
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 160)
+            .background(RoundedRectangle(cornerRadius: Theme.Radius.xl).fill(Theme.secondary))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.xl).stroke(Theme.border, lineWidth: 1))
+        }
+        .accessibilityLabel("참여한 장소")
+    }
+
+    private func manageSheet(_ topic: TopicOut) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(TopicTitle.hashtag(topic.title)).appFont(18, .bold).foregroundStyle(Theme.foreground)
+            if let p = topic.placeName {
+                Text(p).appFont(12).foregroundStyle(Theme.mutedForeground).padding(.top, 4)
+            }
+            sheetRow(topic.muted == true ? "알림 켜기" : "알림 끄기", topic.muted == true ? "bell" : "bell.slash", Theme.foreground) {
+                manage = nil
+                Task { await toggleMute(topic) }
+            }
+            .padding(.top, 16)
+            sheetRow("방 나가기", "rectangle.portrait.and.arrow.right", Theme.destructive) {
+                manage = nil
+                Task {
+                    try? await Task.sleep(for: .milliseconds(350))
+                    leaving = topic
                 }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.mutedForeground)
-            }
-            .padding(14)
-            .background(Theme.background)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.radius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radius).stroke(Theme.border, lineWidth: 1))
-        }
-        .buttonStyle(PressStyle(scale: 0.98))
-    }
-
-    private var emptyRoom: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("아직 들어간 방이 없어요")
-                .font(.system(size: 16, weight: .semibold))
-            Text("주변에서 같은 공간에 있는 사람들과 채팅을 시작해 보세요")
-                .font(.subheadline)
-                .foregroundStyle(Theme.mutedForeground)
-            ShadButton(title: "주변 보러 가기", variant: .outline, compact: true) {
-                Haptics.select()
-                app.tab = .radar
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.muted))
+        .padding(.horizontal, 20)
+        .padding(.top, 34)
+        .rippleSheet(detents: [.height(230)])
     }
 
-    private func topicRow(_ topic: TopicOut) -> some View {
+    private func leaveSheet(_ topic: TopicOut) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("\(TopicTitle.hashtag(topic.title)) 방에서 나갈까요?").appFont(18, .bold).foregroundStyle(Theme.foreground)
+            Text("참여한 방 목록에서 사라져요.").appFont(14).foregroundStyle(Theme.mutedForeground).padding(.top, 8)
+            HStack(spacing: 8) {
+                ShadButton(title: "취소", variant: .secondary) { leaving = nil }
+                ShadButton(title: "나가기", variant: .destructive, systemImage: "rectangle.portrait.and.arrow.right") {
+                    leaving = nil
+                    Task { await leave(topic) }
+                }
+            }
+            .padding(.top, 24)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 34)
+        .rippleSheet(detents: [.height(220)])
+    }
+
+    private func sheetRow(_ title: String, _ icon: String, _ color: Color, action: @escaping () -> Void) -> some View {
         Button {
             Haptics.tap()
-            app.path.append(.topic(topic))
+            action()
         } label: {
             HStack(spacing: 12) {
-                TopicImage(url: topic.imageUrl, category: topic.category)
-                    .frame(width: 42, height: 42)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(topic.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(1)
-                    Text("\(topic.memberCount)명 · \(topic.lastMessageAt.formatted(.relative(presentation: .named)))")
-                        .font(.caption)
-                        .foregroundStyle(Theme.mutedForeground)
-                }
+                Image(systemName: icon).font(.system(size: 17, weight: .medium)).frame(width: 22)
+                Text(title).appFont(14, .semibold)
                 Spacer()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .foregroundStyle(color)
+            .frame(height: 48)
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle(scale: 0.99, dim: 0.6))
+        .buttonStyle(PressStyle(scale: 0.98, dim: 0.6))
+    }
+
+    private func toggleMute(_ topic: TopicOut) async {
+        Haptics.select()
+        let next = !(topic.muted ?? false)
+        do {
+            let updated: TopicOut = try await app.api.request("PATCH", "/topics/\(topic.id)", body: ["muted": next])
+            replace(updated)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func leave(_ topic: TopicOut) async {
+        do {
+            let _: OkResponse = try await app.api.request("POST", "/topics/\(topic.id)/leave")
+            Haptics.success()
+            withAnimation(Motion.settle()) {
+                if let c = chats { chats = ChatsOut(room: c.room, topics: c.topics.filter { $0.id != topic.id }) }
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func replace(_ topic: TopicOut) {
+        guard let c = chats else { return }
+        chats = ChatsOut(room: c.room, topics: c.topics.map { $0.id == topic.id ? topic : $0 })
     }
 
     private func load() async {
