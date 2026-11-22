@@ -15,5 +15,6 @@ ios/Config/Shared.xcconfig
 ios/Config/Debug.xcconfig
 ios/Config/Release.xcconfig
 HANDOFF.md
+MIGRATION.md
 deploy-server.command
 run-simulator.command
